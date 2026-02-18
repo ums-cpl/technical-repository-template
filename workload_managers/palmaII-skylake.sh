@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MANIFEST="$1"
+NUM_TASKS="$2"
+[[ "$NUM_TASKS" -eq 0 ]] && { echo "Error: No tasks to submit." >&2; exit 1; }
+RUNNER="$REPOSITORY_ROOT/run_tasks.sh"
+ARRAY_MAX=$((NUM_TASKS - 1))
+
+TMP=$(mktemp)
+trap "rm -f $TMP" EXIT
+
+cat > "$TMP" << WRAPPER
+#!/bin/bash
+#SBATCH --array=0-${ARRAY_MAX}
+#SBATCH --partition=express,normal,long
+#SBATCH --cpus-per-task=36
+#SBATCH --mem=90gb
+#SBATCH --time=${WALLTIME:-24:00:00}
+#SBATCH --job-name=${JOB_NAME:-run_tasks}
+
+TASK_ID=\${SLURM_ARRAY_TASK_ID}
+exec "$RUNNER" --array-manifest="$MANIFEST" --array-task-id=\$TASK_ID
+WRAPPER
+
+sbatch "$TMP"

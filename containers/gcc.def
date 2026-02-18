@@ -1,0 +1,6 @@
+Bootstrap: docker
+From: debian:stable-slim
+
+%post
+    apt-get update
+    apt-get install -y g++

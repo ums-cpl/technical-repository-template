@@ -1,2 +1,108 @@
 # misc-technical-repository-template
-A minimal template for technical work organized as tasks. Includes a runner script (run_tasks.sh), container definitions (Apptainer), workload manager integration (e.g. SLURM), and example tasks and experiments. Use this as a starting point for benchmarks, evaluations, and other reproducible experiment workflows.
+
+A template for technical work organized as tasks. Provides a common repository structure to facilitate collaboration. Use this as a starting point for benchmarks, evaluations, and reproducible experiment workflows.
+
+## Design
+
+The template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code in `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
+
+### run_tasks.sh
+
+Used to run tasks.
+
+**Usage:**
+
+```
+./run_tasks.sh [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
+```
+
+**KEY=VALUE** pairs are environment overrides applied after sourcing env files and can be read inside the task script.
+
+**TASK** can be:
+
+- A task directory (path to a dir containing `task.sh`)
+- A parent directory (recursively finds all descendant dirs with `task.sh`)
+- A wildcard (e.g. `tasks/.../*`; use `"!(pattern)"` to exclude)
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Print tasks only, do not run |
+| `--clean` | Remove output folders for specified tasks |
+| `--run=SPEC` | Set run(s) (default: `assets`). Comma-separated; each entry is `prefix:start:end` (e.g. `run:1:10` for `run1`, `run2`, ..., `run10`) or a literal (e.g. `local`). Each run uses a separate output folder, allowing multiple executions (e.g. for averaging or running on different machines). |
+| `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script |
+| `--job-name=NAME` | Job name for workload manager |
+| `--walltime=TIME` | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
+| `--skip-verify-def` | Skip verification that container `.sif` matches `containers/*.def` |
+
+**Examples:**
+
+```bash
+./run_tasks.sh tasks/build
+./run_tasks.sh --dry-run tasks/experiment/MatMul
+./run_tasks.sh --run=run:1:5 tasks/experiment/MatMul/IS1/baseline
+./run_tasks.sh --workload-manager=workload_managers/slurm.sh --walltime=1:00:00 tasks/experiment
+./run_tasks.sh --clean --run=run1 tasks/experiment
+```
+
+### Tasks
+
+Tasks are defined as a tree under `tasks/`. Each task is a directory containing `task.sh`.
+
+- **Tree structure:** Directories under `tasks/` form a hierarchy; any dir with `task.sh` is a task.
+- **env files:** `env.sh`, `env_host.sh`, and `env_container.sh` may appear along the path from `tasks/` to a task. They are sourced in root-to-leaf order before `task.sh` runs. `env_host.sh` is used on the host; `env_container.sh` inside the container. Optionally set `CONTAINER` to a `.sif` file in `containers/` to run the task inside that container.
+- **Paths:** Use `$REPOSITORY_ROOT` and `$RUN_FOLDER` for paths. Reference assets and containers relative to `$REPOSITORY_ROOT`. Task output goes to `$RUN_FOLDER`.
+- **Dependencies:** Task dependencies cannot be expressed; ordering is the user's responsibility.
+
+### Assets
+
+Assets hold the actual implementation of experiments. Structure is flexible; there is no predefined layout. Write outputs to the current working directory (which is `$RUN_FOLDER`) so the task framework manages data placement.
+
+### Containers
+
+Containers provide a fixed environment for running tasks and document how to build experiments. They are runtime-only: all task output is stored on the host. Use Apptainer `.def` files; build with `apptainer build <image>.sif containers/<name>.def`.
+
+### Workload Managers
+
+Workload manager scripts allow running tasks in parallel to reduce overall runtime. `run_tasks.sh` creates a manifest and invokes the script; the script submits a job array where each element runs one task.
+
+**Interface:** A workload manager script is invoked as:
+
+```bash
+./workload_managers/<script> "$MANIFEST_PATH" "$NUM_TASKS"
+```
+
+**Arguments:** `$1` = manifest path, `$2` = number of tasks (array size).
+
+**Environment:** `REPOSITORY_ROOT` is exported. `JOB_NAME` and `WALLTIME` are exported if passed via `run_tasks.sh`.
+
+**Contract:** Submit a job array of size `$2`. Each array element must run:
+
+```bash
+"$REPOSITORY_ROOT/run_tasks.sh" --array-manifest="$MANIFEST_PATH" --array-task-id=<INDEX>
+```
+
+where `<INDEX>` is 0-based (e.g. `SLURM_ARRAY_TASK_ID` for SLURM).
+
+## Best Practices
+
+- **Assets:** Write them as if tasks don't exist—executable by themselves, not reading the `tasks/` folder directly. Accept paths to files/folders (that may be in `tasks/`) as arguments instead.
+- **Tasks:** Keep `task.sh` short and simple; do task-related processing in asset files. Use `env.sh` to define helper functions shared by similar tasks.
+- **Containers:** Avoid unnecessary bloat to keep image sizes small.
+
+## Example
+
+The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/MatMul/` generates plots from the results. It illustrates env inheritance, container use for build and plot, and how assets receive task paths as arguments.
+
+## Artifact Packing
+
+This template simplifies the process of creating an artifact (e.g., a reproducibility artifact for a submission) into the following steps:
+
+1. Gather relevant assets, tasks, containers, workload managers, and `run_tasks.sh` into a new repository.
+2. Create high-level scripts that run the necessary tasks via `run_tasks.sh` (typically: build, create data, run experiments, plot results).
+3. Create an artifact readme.
+4. Distribute:
+   - **Mutable on GitHub:** Most up-to-date version (e.g., including bug fixes) with container definition files only.
+   - **Immutable on Zenodo (or similar):** For paper reference, with both container definition files and built containers. Artifact readme links to GitHub for the latest version.
+   - This separation records the exact environment used for experiments while keeping the GitHub repository small.
