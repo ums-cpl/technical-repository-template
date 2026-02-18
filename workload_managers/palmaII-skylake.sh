@@ -13,7 +13,7 @@ trap "rm -f $TMP" EXIT
 cat > "$TMP" << WRAPPER
 #!/bin/bash
 #SBATCH --array=0-${ARRAY_MAX}
-#SBATCH --partition=express,normal,long
+#SBATCH --partition=normal,long
 #SBATCH --cpus-per-task=36
 #SBATCH --mem=90gb
 #SBATCH --time=${WALLTIME:-24:00:00}
