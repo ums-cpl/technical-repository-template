@@ -95,6 +95,25 @@ where `<INDEX>` is 0-based (e.g. `SLURM_ARRAY_TASK_ID` for SLURM).
 
 The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/MatMul/` generates plots from the results. It illustrates env inheritance, container use for build and plot, and how assets receive task paths as arguments.
 
+### Running the Example Tasks
+
+```bash
+# 1. Build data and experiment binaries (compiles with the appropriate container)
+./run_tasks.sh tasks/build
+
+# 2. Create data used for experiments
+./run_tasks.sh tasks/experiment/MatMul/*/data
+
+# 3. Run all experiment tasks 5 times
+./run_tasks.sh --run=run:1:5 "tasks/experiment/MatMul/*/!(data)"
+
+# 4. Generate plots from experiment results in tasks/plot/MatMul/assets
+./run_tasks.sh tasks/plot
+
+# 5. Clean task data
+./run_tasks.sh --clean tasks
+```
+
 ## Artifact Packing
 
 This template simplifies the process of creating an artifact (e.g., a reproducibility artifact for a submission) into the following steps:
