@@ -434,6 +434,7 @@ if [[ -z "\${CONTAINER_INNER:-}" ]]; then
     exec apptainer exec \$gpu_flag -B "\$REPOSITORY_ROOT:\$REPOSITORY_ROOT" "\$CONTAINER" env CONTAINER_INNER=1 bash "\$(cd "\$(dirname "\$0")" && pwd)/.runner_script.sh"
   fi
 else
+  :
   $source_cmds_container
 fi
 $export_cmds
