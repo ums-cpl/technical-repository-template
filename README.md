@@ -1,4 +1,4 @@
-# misc-technical-repository-template
+# technical-repository-template
 
 A template for technical work organized as tasks. Provides a common repository structure to facilitate collaboration. Use this as a starting point for benchmarks, evaluations, and reproducible experiment workflows.
 
