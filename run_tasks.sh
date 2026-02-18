@@ -265,8 +265,10 @@ get_env_container_files() {
 create_manifest() {
   local -n _tasks=$1
   local -n _runs=$2
-  local manifest_path
-  manifest_path="$REPOSITORY_ROOT/run_tasks_array_$(date +%Y%m%d_%H%M%S)_$$.manifest"
+  local manifest_path job_safe
+  job_safe="${JOB_NAME:-run_tasks}"
+  job_safe="${job_safe//[\/ ]/_}"
+  manifest_path="$REPOSITORY_ROOT/run_tasks_array_${job_safe}_$(date +%Y%m%d_%H%M%S)_$$.manifest"
 
   {
     echo "SKIP_VERIFY_DEF=$SKIP_VERIFY_DEF"
