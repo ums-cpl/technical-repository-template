@@ -19,6 +19,7 @@ cat > "$TMP" << WRAPPER
 #SBATCH --time=${WALLTIME:-2:00:00}
 #SBATCH --job-name=${JOB_NAME:-run_tasks}
 
+module add Apptainer
 TASK_ID=\${SLURM_ARRAY_TASK_ID}
 exec "$RUNNER" --array-manifest="$MANIFEST" --array-task-id=\$TASK_ID
 WRAPPER
