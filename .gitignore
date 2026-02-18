@@ -1,2 +1,2 @@
 *.sif
-run_tasks_array_*.manifest
+workload_logs/
