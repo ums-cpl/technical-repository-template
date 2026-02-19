@@ -262,19 +262,21 @@ get_env_container_files() {
 # --- Manifest (for workload manager job arrays) ---
 # Creates a manifest file mapping array index to task path.
 # Format: SKIP_VERIFY_DEF, env overrides (one per line), ---, INDEX<TAB>RUN<TAB>PATH per task.
-# Each invocation uses workload_logs/<job>_<timestamp>/; aborts if folder exists.
+# Each invocation uses workload_logs/<job>/ or workload_logs/<job>_<n>/ if job folder exists (n=1,2,...).
 RUN_TASKS_OUTPUT_ROOT="$REPOSITORY_ROOT/workload_logs"
 create_manifest() {
   local -n _tasks=$1
   local -n _runs=$2
-  local manifest_path job_safe timestamp inv_dir
+  local manifest_path job_safe inv_dir n
   job_safe="${JOB_NAME:-run_tasks}"
   job_safe="${job_safe//[\/ ]/_}"
-  timestamp="$(date +%Y%m%d_%H%M%S)"
-  inv_dir="$RUN_TASKS_OUTPUT_ROOT/${job_safe}_${timestamp}"
+  inv_dir="$RUN_TASKS_OUTPUT_ROOT/${job_safe}"
   if [[ -d "$inv_dir" ]]; then
-    echo "Error: Output folder already exists: $inv_dir" >&2
-    exit 1
+    n=1
+    while [[ -d "$RUN_TASKS_OUTPUT_ROOT/${job_safe}_${n}" ]]; do
+      n=$((n + 1))
+    done
+    inv_dir="$RUN_TASKS_OUTPUT_ROOT/${job_safe}_${n}"
   fi
   mkdir -p "$inv_dir"
   manifest_path="$inv_dir/manifest"
