@@ -308,12 +308,15 @@ echo "-----  ---------------------------  -------"
 while IFS=$'\t' read -r idx run path; do
   [[ "$idx" =~ ^[0-9]+$ ]] || continue
   run_folder="$path/$run"
-  if [[ -f "$run_folder/.success" ]]; then
+  # State files older than manifest are from a previous run; treat as PENDING
+  if [[ -f "$run_folder/.success" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.success" ]]; then
     status=$'\033[32mSUCCESS\033[0m'
-  elif [[ -f "$run_folder/.failed" ]]; then
+  elif [[ -f "$run_folder/.failed" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.failed" ]]; then
     status=$'\033[31mFAILED\033[0m'
+  elif [[ -f "$run_folder/.begin" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.begin" ]]; then
+    status=$'\033[92mRUNNING\033[0m'
   else
-    status=$'\033[33mPENDING\033[0m'
+    status=$'\033[2mPENDING\033[0m'
   fi
   printf "%-5s  %-27s  %b\n" "$idx" "$run" "$status"
 done < <(awk -F'\t' '/^[0-9]+\t/ {print}' "$MANIFEST")
