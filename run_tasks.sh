@@ -296,6 +296,30 @@ create_manifest() {
     done
   } > "$manifest_path"
 
+  # Script to print exit states from task run folders
+  cat > "$inv_dir/show_exit_states.sh" << 'EXIT_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+MANIFEST="$(cd "$(dirname "$0")" && pwd)/manifest"
+[[ ! -f "$MANIFEST" ]] && { echo "Error: manifest not found: $MANIFEST" >&2; exit 1; }
+echo "Task exit states (from run folders):"
+echo "INDEX  RUN                          STATUS "
+echo "-----  ---------------------------  -------"
+while IFS=$'\t' read -r idx run path; do
+  [[ "$idx" =~ ^[0-9]+$ ]] || continue
+  run_folder="$path/$run"
+  if [[ -f "$run_folder/.success" ]]; then
+    status=$'\033[32mSUCCESS\033[0m'
+  elif [[ -f "$run_folder/.failed" ]]; then
+    status=$'\033[31mFAILED\033[0m'
+  else
+    status=$'\033[33mPENDING\033[0m'
+  fi
+  printf "%-5s  %-27s  %b\n" "$idx" "$run" "$status"
+done < <(awk -F'\t' '/^[0-9]+\t/ {print}' "$MANIFEST")
+EXIT_SCRIPT
+  chmod +x "$inv_dir/show_exit_states.sh"
+
   echo "$manifest_path"
 }
 
