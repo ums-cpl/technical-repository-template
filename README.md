@@ -90,6 +90,7 @@ where `<INDEX>` is 0-based (e.g. `SLURM_ARRAY_TASK_ID` for SLURM).
 - **Assets:** Write them as if tasks don't exist—executable by themselves, not reading the `tasks/` folder directly. Accept paths to files/folders (that may be in `tasks/`) as arguments instead.
 - **Tasks:** Keep `task.sh` short and simple; do task-related processing in asset files. Use `env.sh` to define helper functions shared by similar tasks.
 - **Containers:** Avoid unnecessary bloat to keep image sizes small.
+- **Documentation:** Describe the available tasks and how they are expected to run. For each task (or task group), document its purpose, prerequisites, inputs, outputs, and invocation (e.g., via a README).
 
 ## Example
 
