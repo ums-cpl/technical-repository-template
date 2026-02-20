@@ -2,6 +2,12 @@
 
 A template for technical work organized as tasks. Provides a common repository structure to facilitate collaboration. Use this as a starting point for benchmarks, evaluations, and reproducible experiment workflows.
 
+> **Note:** This is a living template and is intended to be improved over time. Any feedback, suggestions, or criticism are very welcome -- please send comments to [Richard](mailto:r.schulze@uni-muenster.de).
+
+## Getting Started on the Palma II Cluster
+
+A [getting started guide](palmaII-getting-started.md) is available for users not familiar with the Palma II cluster or SLURM. It explains how to use the cluster without this template. That background is required for making efficient use of the template.
+
 ## Design
 
 The template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code in `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
@@ -92,7 +98,7 @@ where `<INDEX>` is 0-based (e.g. `SLURM_ARRAY_TASK_ID` for SLURM).
 - **Assets:** Write them as if tasks don't exist—executable by themselves, not reading the `tasks/` folder directly. Accept paths to files/folders (that may be in `tasks/`) as arguments instead.
 - **Tasks:** Keep `task.sh` short and simple; do task-related processing in asset files. Use `env.sh` to define helper functions shared by similar tasks.
 - **Containers:** Avoid unnecessary bloat to keep image sizes small.
-- **Documentation:** Describe the available tasks and how they are expected to run. For each task (or task group), document its purpose, prerequisites, inputs, outputs, and invocation (e.g., via a README).
+- **Documentation:** Describe the available tasks and how they are expected to run. For each task (or task group), document its purpose, prerequisites, inputs, outputs, and exact call to `run_tasks.sh` (e.g., via a README).
 
 ## Example
 
@@ -107,7 +113,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 # 2. Create data used for experiments
 ./run_tasks.sh tasks/experiment/MatMul/*/data
 
-# 3. Run all experiment tasks 5 times
+# 3. Run all experiment tasks (except data generation) 5 times
 ./run_tasks.sh --run=run:1:5 "tasks/experiment/MatMul/*/!(data)"
 
 # 4. Generate plots from experiment results in tasks/plot/MatMul/assets
