@@ -14,10 +14,10 @@ trap "rm -f $TMP" EXIT
 cat > "$TMP" << WRAPPER
 #!/bin/bash
 #SBATCH --array=0-${ARRAY_MAX}
-#SBATCH --partition=express,normal,long
+#SBATCH --partition=normal,long
 #SBATCH --cpus-per-task=36
 #SBATCH --mem=90gb
-#SBATCH --time=${WALLTIME:-2:00:00}
+#SBATCH --time=${WALLTIME:-7-00:00:00}
 #SBATCH --job-name=${JOB_NAME:-run_tasks}
 #SBATCH --output=${OUTPUT_DIR}/task_%a.out
 #SBATCH --error=${OUTPUT_DIR}/task_%a.err

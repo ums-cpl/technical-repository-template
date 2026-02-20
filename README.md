@@ -67,6 +67,8 @@ Containers provide a fixed environment for running tasks and document how to bui
 
 Workload manager scripts allow running tasks in parallel to reduce overall runtime. `run_tasks.sh` creates a manifest and invokes the script; the script submits a job array where each element runs one task.
 
+Several pre-defined workload manager scripts are provided in the `workload_managers/` directory. These scripts are categorized by CPU or GPU architecture and the expected runtime. The default script has no suffix; scripts with suffixes like `l`, `xl`, or `xxl` are intended for longer runtimes, while the `compact` script is suited for sequential or low-resource tasks such as compilation.
+
 **Interface:** A workload manager script is invoked as:
 
 ```bash
