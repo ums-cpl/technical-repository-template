@@ -806,14 +806,15 @@ main() {
         exit 1
       fi
       if [[ "$DRY_RUN" == true ]]; then
-        echo "Would create manifest and call: $wm_script <manifest>"
+        echo "Would create manifest and call: $wm_script <manifest> <log_dir>"
         exit 0
       fi
       manifest_path=$(create_manifest tasks RUNS)
+      log_dir="$(dirname "$manifest_path")"
       export REPOSITORY_ROOT
       [[ -n "$JOB_NAME" ]] && export JOB_NAME
       [[ -n "$WALLTIME" ]] && export WALLTIME
-      bash "$wm_script" "$manifest_path"
+      bash "$wm_script" "$manifest_path" "$log_dir"
       exit $?
     fi
 

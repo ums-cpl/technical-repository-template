@@ -2,9 +2,11 @@
 set -euo pipefail
 
 MANIFEST="$1"
+LOG_DIR="$2"
 [[ -z "$MANIFEST" ]] && { echo "Error: Manifest path required." >&2; exit 1; }
+[[ -z "$LOG_DIR" ]] && { echo "Error: Log directory required." >&2; exit 1; }
 RUNNER="$REPOSITORY_ROOT/run_tasks.sh"
-OUTPUT_DIR="$(dirname "$MANIFEST")"
+OUTPUT_DIR="$LOG_DIR"
 
 SBATCH_PARTITION="gpu2080"
 SBATCH_GRES="gpu:1"

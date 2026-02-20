@@ -2,8 +2,9 @@
 # Shared logic for SLURM workload managers: parse manifest fully, then submit jobs.
 # Source this from workload manager scripts after setting SBATCH_* variables.
 
-# Parse manifest and submit jobs. Uses: MANIFEST, RUNNER, OUTPUT_DIR, JOB_NAME, WALLTIME,
+# Parse manifest and submit jobs. Uses: MANIFEST, RUNNER, OUTPUT_DIR (log directory), JOB_NAME, WALLTIME,
 # and SBATCH_PARTITION, SBATCH_GRES (optional), SBATCH_CPUS_PER_TASK, SBATCH_MEM, SBATCH_TIME.
+# Writes stdout and stderr to the same .log file per array task (output is typically empty).
 parse_and_submit() {
   local manifest="$1"
   [[ ! -f "$manifest" ]] && { echo "Error: Manifest not found: $manifest" >&2; exit 1; }
@@ -101,8 +102,7 @@ parse_and_submit() {
       echo "#SBATCH --mem=${SBATCH_MEM}"
       echo "#SBATCH --time=${SBATCH_TIME:-${WALLTIME:-2:00:00}}"
       echo "#SBATCH --job-name=${JOB_NAME:-run_tasks}_${jid}"
-      echo "#SBATCH --output=${OUTPUT_DIR}/job${jid}_%a.out"
-      echo "#SBATCH --error=${OUTPUT_DIR}/job${jid}_%a.err"
+      echo "#SBATCH --output=${OUTPUT_DIR}/job${jid}_%a.log"
       [[ -n "$dep_line" ]] && echo "$dep_line"
       echo ""
       echo "module add Apptainer"

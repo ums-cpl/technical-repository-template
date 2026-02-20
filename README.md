@@ -78,10 +78,10 @@ Several pre-defined workload manager scripts are provided in the `workload_manag
 **Interface:** A workload manager script is invoked as:
 
 ```bash
-./workload_managers/<script> "$MANIFEST_PATH"
+./workload_managers/<script> "$MANIFEST_PATH" "$LOG_DIR"
 ```
 
-**Arguments:** `$1` = manifest path.
+**Arguments:** `$1` = manifest path, `$2` = directory for job log files
 
 **Environment:** `REPOSITORY_ROOT` is exported. `JOB_NAME` and `WALLTIME` are exported if passed via `run_tasks.sh`.
 
