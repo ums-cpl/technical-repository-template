@@ -2,30 +2,15 @@
 set -euo pipefail
 
 MANIFEST="$1"
-NUM_TASKS="$2"
-[[ "$NUM_TASKS" -eq 0 ]] && { echo "Error: No tasks to submit." >&2; exit 1; }
+[[ -z "$MANIFEST" ]] && { echo "Error: Manifest path required." >&2; exit 1; }
 RUNNER="$REPOSITORY_ROOT/run_tasks.sh"
-ARRAY_MAX=$((NUM_TASKS - 1))
 OUTPUT_DIR="$(dirname "$MANIFEST")"
 
-TMP=$(mktemp)
-trap "rm -f $TMP" EXIT
+SBATCH_PARTITION="gpuv100"
+SBATCH_GRES="gpu:1"
+SBATCH_CPUS_PER_TASK="6"
+SBATCH_MEM="45gb"
+SBATCH_TIME="${WALLTIME:-2:00:00}"
 
-cat > "$TMP" << WRAPPER
-#!/bin/bash
-#SBATCH --array=0-${ARRAY_MAX}
-#SBATCH --partition=gpuv100
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=45gb
-#SBATCH --time=${WALLTIME:-2:00:00}
-#SBATCH --job-name=${JOB_NAME:-run_tasks}
-#SBATCH --output=${OUTPUT_DIR}/task_%a.out
-#SBATCH --error=${OUTPUT_DIR}/task_%a.err
-
-module add Apptainer
-TASK_ID=\${SLURM_ARRAY_TASK_ID}
-exec "$RUNNER" --array-manifest="$MANIFEST" --array-task-id=\$TASK_ID
-WRAPPER
-
-sbatch "$TMP"
+source "$(dirname "$0")/slurm_common.sh"
+parse_and_submit "$MANIFEST"

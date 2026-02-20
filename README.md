@@ -59,7 +59,7 @@ Tasks are defined as a tree under `tasks/`. Each task is a directory containing 
 - **Tree structure:** Directories under `tasks/` form a hierarchy; any dir with `task.sh` is a task.
 - **env files:** `env.sh`, `env_host.sh`, and `env_container.sh` may appear along the path from `tasks/` to a task. They are sourced in root-to-leaf order before `task.sh` runs. `env_host.sh` is used on the host; `env_container.sh` inside the container. Optionally set `CONTAINER` to a `.sif` file in `containers/` to run the task inside that container.
 - **Paths:** Use `$REPOSITORY_ROOT` and `$RUN_FOLDER` for paths. Reference assets and containers relative to `$REPOSITORY_ROOT`. Task output goes to `$RUN_FOLDER`.
-- **Dependencies:** Task dependencies cannot be expressed; ordering is the user's responsibility.
+- **Dependencies:** Optionally set `TASK_DEPENDS` (array of task path patterns) in `env.sh` to declare dependencies. The runner orders the tasks of the current invocation by dependency. If a task depends on another task that is not part of the invocation, the runner does not run the missing tasks; it fails with an error listing the missing dependencies.
 
 ### Assets
 
@@ -71,27 +71,29 @@ Containers provide a fixed environment for running tasks and document how to bui
 
 ### Workload Managers
 
-Workload manager scripts allow running tasks in parallel to reduce overall runtime. `run_tasks.sh` creates a manifest and invokes the script; the script submits a job array where each element runs one task.
+Workload manager scripts allow running tasks in parallel to reduce overall runtime. `run_tasks.sh` creates a manifest and invokes the script; the script submits one or multiple job arrays where each array element runs one task.
 
 Several pre-defined workload manager scripts are provided in the `workload_managers/` directory. These scripts are categorized by CPU or GPU architecture and the expected runtime. The default script has no suffix; scripts with suffixes like `l`, `xl`, or `xxl` are intended for longer runtimes, while the `compact` script is suited for sequential or low-resource tasks such as compilation.
 
 **Interface:** A workload manager script is invoked as:
 
 ```bash
-./workload_managers/<script> "$MANIFEST_PATH" "$NUM_TASKS"
+./workload_managers/<script> "$MANIFEST_PATH"
 ```
 
-**Arguments:** `$1` = manifest path, `$2` = number of tasks (array size).
+**Arguments:** `$1` = manifest path.
 
 **Environment:** `REPOSITORY_ROOT` is exported. `JOB_NAME` and `WALLTIME` are exported if passed via `run_tasks.sh`.
 
-**Contract:** Submit a job array of size `$2`. Each array element must run:
+**Contract:** The script must (1) fully parse and validate the manifest before submitting any jobs to avoid partially submitted workloads; (2) submit and ensure processing of jobs in dependency order; (3) each array element must run:
 
 ```bash
-"$REPOSITORY_ROOT/run_tasks.sh" --array-manifest="$MANIFEST_PATH" --array-task-id=<INDEX>
+"$REPOSITORY_ROOT/run_tasks.sh" --array-manifest="$MANIFEST_PATH" --array-job-id=<JOB> --array-task-id=<INDEX>
 ```
 
-where `<INDEX>` is 0-based (e.g. `SLURM_ARRAY_TASK_ID` for SLURM).
+where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task index within that job.
+
+**Manifest format:** Header (SKIP_VERIFY_DEF, env overrides, `---`), then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and `INDEX\tRUN\tPATH` lines per task.
 
 ## Best Practices
 
@@ -121,6 +123,12 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 
 # 5. Clean task data
 ./run_tasks.sh --clean tasks
+```
+
+With dependencies declared in `env.sh` (via `TASK_DEPENDS`), the workflow can be submitted as a single command:
+
+```bash
+./run_tasks.sh tasks/
 ```
 
 ## Artifact Packing

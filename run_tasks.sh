@@ -17,6 +17,7 @@ WORKLOAD_MANAGER_SCRIPT=""
 JOB_NAME=""
 WALLTIME=""
 ARRAY_MANIFEST=""
+ARRAY_JOB_ID=""
 ARRAY_TASK_ID=""
 declare -a ENV_OVERRIDES=()
 declare -a TASK_ARGS=()
@@ -78,6 +79,10 @@ parse_args() {
         ;;
       --array-manifest=*)
         ARRAY_MANIFEST="${1#--array-manifest=}"
+        shift
+        ;;
+      --array-job-id=*)
+        ARRAY_JOB_ID="${1#--array-job-id=}"
         shift
         ;;
       --array-task-id=*)
@@ -259,15 +264,176 @@ get_env_container_files() {
   printf '%s\n' "${env_files[@]}"
 }
 
+# Get TASK_DEPENDS for a task by sourcing its env files (host context).
+# Returns array of dependency patterns; empty if TASK_DEPENDS is not set.
+# Uses a dummy RUN_FOLDER for sourcing (deps don't need real paths).
+get_task_depends() {
+  local task_dir="$1"
+  local -n _out=$2
+  _out=()
+  local env_files=() env_host_files=()
+  local env_file
+  while IFS= read -r env_file; do
+    [[ -n "$env_file" ]] && env_files+=("$env_file")
+  done < <(get_env_files "$task_dir")
+  while IFS= read -r env_file; do
+    [[ -n "$env_file" ]] && env_host_files+=("$env_file")
+  done < <(get_env_host_files "$task_dir")
+
+  local source_cmds=""
+  for ef in "${env_files[@]}"; do
+    source_cmds+="source \"$ef\"; "
+  done
+  for ef in "${env_host_files[@]}"; do
+    source_cmds+="source \"$ef\"; "
+  done
+
+  local dep
+  while IFS= read -r dep; do
+    [[ -n "$dep" ]] && _out+=("$dep")
+  done < <(bash -c "
+    export REPOSITORY_ROOT=\"$REPOSITORY_ROOT\"
+    export RUN_FOLDER=\"$task_dir/assets\"
+    TASK_DEPENDS=()
+    $source_cmds
+    for d in \"\${TASK_DEPENDS[@]:-}\"; do
+      [[ -n \"\$d\" ]] && echo \"\$d\"
+    done
+  " 2>/dev/null || true)
+}
+
+# Compute stages from task dependencies. Populates _task_stage[path]=stage_id.
+# Sets _max_stage to max stage id (stages are 0.._max_stage). Errors on cycle or invalid dep.
+compute_stages() {
+  local -n _tasks=$1
+  local -n _task_stage=$2
+  local -n _max_stage=$3
+  _task_stage=()
+
+  # Build dependency map: task -> list of tasks it depends on (absolute paths)
+  # Check that all dependencies are in the invocation; collect missing ones and error clearly
+  declare -A deps
+  declare -A missing_deps
+  local missing_count=0
+  local task_dir dep_pattern resolved r
+  for task_dir in "${_tasks[@]}"; do
+    deps["$task_dir"]=""
+    local dep_patterns=()
+    get_task_depends "$task_dir" dep_patterns
+    for dep_pattern in "${dep_patterns[@]}"; do
+      resolved=()
+      while IFS= read -r r; do
+        [[ -n "$r" ]] && resolved+=("$r")
+      done < <(resolve_arg "$dep_pattern" "$REPOSITORY_ROOT")
+      for r in "${resolved[@]}"; do
+        local found=false
+        for t in "${_tasks[@]}"; do
+          [[ "$t" == "$r" ]] && { found=true; break; }
+        done
+        if [[ "$found" != true ]]; then
+          local rel_task="${task_dir#$TASKS_DIR/}"
+          missing_deps["$r"]="${missing_deps["$r"]:+${missing_deps["$r"]}, }tasks/$rel_task"
+          missing_count=$((missing_count + 1))
+        else
+          deps["$task_dir"]+=" $r"
+        fi
+      done
+    done
+  done
+
+  if [[ $missing_count -gt 0 ]]; then
+    echo "Error: The following dependencies are not part of the current invocation:" >&2
+    for dep in "${!missing_deps[@]}"; do
+      local rel_dep="${dep#$TASKS_DIR/}"
+      echo "  - tasks/$rel_dep" >&2
+      echo "    required by:" >&2
+      local req
+      for req in $(echo "${missing_deps[$dep]}" | tr ',' '\n' | sed 's/^ *//;s/ *$//'); do
+        [[ -n "$req" ]] && echo "      - $req" >&2
+      done
+    done
+    echo "" >&2
+    echo "Include these tasks in your invocation or run the dependencies first." >&2
+    exit 1
+  fi
+
+  # Topological sort with cycle detection (Kahn's algorithm)
+  declare -A in_degree
+  for task_dir in "${_tasks[@]}"; do
+    in_degree["$task_dir"]=0
+  done
+  for task_dir in "${_tasks[@]}"; do
+    for dep in ${deps["$task_dir"]}; do
+      [[ -n "$dep" ]] && in_degree["$task_dir"]=$((${in_degree["$task_dir"]} + 1))
+    done
+  done
+
+  local stage=0
+  local remaining=("${_tasks[@]}")
+  while [[ ${#remaining[@]} -gt 0 ]]; do
+    local ready=()
+    for task_dir in "${remaining[@]}"; do
+      if [[ ${in_degree["$task_dir"]} -eq 0 ]]; then
+        ready+=("$task_dir")
+      fi
+    done
+    if [[ ${#ready[@]} -eq 0 ]]; then
+      echo "Error: Circular dependency detected among tasks." >&2
+      exit 1
+    fi
+    for task_dir in "${ready[@]}"; do
+      _task_stage["$task_dir"]=$stage
+    done
+    for task_dir in "${remaining[@]}"; do
+      for dep in ${deps["$task_dir"]}; do
+        for ready_task in "${ready[@]}"; do
+          if [[ "$dep" == "$ready_task" ]]; then
+            in_degree["$task_dir"]=$((${in_degree["$task_dir"]} - 1))
+            break
+          fi
+        done
+      done
+    done
+    local new_remaining=()
+    for task_dir in "${remaining[@]}"; do
+      local is_ready=false
+      for r in "${ready[@]}"; do
+        [[ "$task_dir" == "$r" ]] && { is_ready=true; break; }
+      done
+      [[ "$is_ready" != true ]] && new_remaining+=("$task_dir")
+    done
+    remaining=("${new_remaining[@]}")
+    stage=$((stage + 1))
+  done
+  _max_stage=$((stage - 1))
+}
+
 # --- Manifest (for workload manager job arrays) ---
-# Creates a manifest file mapping array index to task path.
-# Format: SKIP_VERIFY_DEF, env overrides (one per line), ---, INDEX<TAB>RUN<TAB>PATH per task.
-# Each invocation uses workload_logs/<job>/ or workload_logs/<job>_<n>/ if job folder exists (n=1,2,...).
+# Creates a single manifest file with multiple jobs, each with tasks and dependencies.
+# Format: header (SKIP_VERIFY_DEF, env overrides, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH.
 RUN_TASKS_OUTPUT_ROOT="$REPOSITORY_ROOT/workload_logs"
 create_manifest() {
   local -n _tasks=$1
   local -n _runs=$2
   local manifest_path job_safe inv_dir n
+
+  declare -A task_stage
+  local max_stage=0
+  compute_stages "$1" task_stage max_stage
+
+  # Build task deps for job dependency computation
+  declare -A deps
+  local task_dir dep_patterns=() resolved r
+  for task_dir in "${_tasks[@]}"; do
+    deps["$task_dir"]=""
+    get_task_depends "$task_dir" dep_patterns
+    for dep_pattern in "${dep_patterns[@]}"; do
+      while IFS= read -r r; do
+        [[ -n "$r" ]] && deps["$task_dir"]+=" $r"
+      done < <(resolve_arg "$dep_pattern" "$REPOSITORY_ROOT")
+    done
+  done
+
   job_safe="${JOB_NAME:-run_tasks}"
   job_safe="${job_safe//[\/ ]/_}"
   inv_dir="$RUN_TASKS_OUTPUT_ROOT/${job_safe}"
@@ -287,11 +453,32 @@ create_manifest() {
       echo "$ov"
     done
     echo "---"
-    local i=0
-    for run_name in "${_runs[@]}"; do
+    local stage job_id task_dir run_name i
+    for stage in $(seq 0 "$max_stage"); do
+      local stage_tasks=()
       for task_dir in "${_tasks[@]}"; do
-        printf '%d\t%s\t%s\n' "$i" "$run_name" "$task_dir"
-        i=$((i + 1))
+        [[ "${task_stage[$task_dir]:--1}" == "$stage" ]] && stage_tasks+=("$task_dir")
+      done
+      [[ ${#stage_tasks[@]} -eq 0 ]] && continue
+      job_id=$stage
+      echo "JOB	$job_id"
+      local dep_jobs=()
+      for task_dir in "${stage_tasks[@]}"; do
+        for dep in ${deps["$task_dir"]}; do
+          [[ -z "$dep" ]] && continue
+          local dep_stage="${task_stage[$dep]:--1}"
+          [[ "$dep_stage" -lt "$stage" ]] && dep_jobs+=("$dep_stage")
+        done
+      done
+      local dep_list
+      dep_list=$(printf '%s\n' "${dep_jobs[@]}" | sort -nu | tr '\n' ',' | sed 's/,$//')
+      echo "DEPENDS	$dep_list"
+      i=0
+      for run_name in "${_runs[@]}"; do
+        for task_dir in "${stage_tasks[@]}"; do
+          printf '%d\t%s\t%s\n' "$i" "$run_name" "$task_dir"
+          i=$((i + 1))
+        done
       done
     done
   } > "$manifest_path"
@@ -303,12 +490,11 @@ set -euo pipefail
 MANIFEST="$(cd "$(dirname "$0")" && pwd)/manifest"
 [[ ! -f "$MANIFEST" ]] && { echo "Error: manifest not found: $MANIFEST" >&2; exit 1; }
 echo "Task exit states (from run folders):"
-echo "INDEX  RUN                          STATUS "
-echo "-----  ---------------------------  -------"
-while IFS=$'\t' read -r idx run path; do
-  [[ "$idx" =~ ^[0-9]+$ ]] || continue
+echo "JOB/IDX  RUN                          PATH                              STATUS "
+echo "-------  ---------------------------  --------------------------------  -------"
+while IFS=$'\t' read -r job_id idx run path; do
+  [[ -z "$path" ]] && continue
   run_folder="$path/$run"
-  # State files older than manifest are from a previous run; treat as PENDING
   if [[ -f "$run_folder/.success" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.success" ]]; then
     status=$'\033[32mSUCCESS\033[0m'
   elif [[ -f "$run_folder/.failed" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.failed" ]]; then
@@ -318,8 +504,8 @@ while IFS=$'\t' read -r idx run path; do
   else
     status=$'\033[2mPENDING\033[0m'
   fi
-  printf "%-5s  %-27s  %b\n" "$idx" "$run" "$status"
-done < <(awk -F'\t' '/^[0-9]+\t/ {print}' "$MANIFEST")
+  printf "%-7s  %-27s  %-32s  %b\n" "${job_id}/${idx}" "$run" "$(basename "$path")" "$status"
+done < <(awk -F'\t' 'BEGIN{j=""} /^JOB\t/ {j=$2; next} /^[0-9]+\t/ {print j"\t"$0}' "$MANIFEST")
 EXIT_SCRIPT
   chmod +x "$inv_dir/show_exit_states.sh"
 
@@ -327,9 +513,11 @@ EXIT_SCRIPT
 }
 
 # Run a single task from a manifest (array execution mode).
+# Requires --array-job-id and --array-task-id. Looks up job block and task within it.
 run_array_task() {
   local manifest="$1"
-  local task_id="$2"
+  local job_id="$2"
+  local task_id="$3"
   local line task_dir
 
   # Parse header: SKIP_VERIFY_DEF, then KEY=VALUE lines until ---
@@ -343,11 +531,14 @@ run_array_task() {
     fi
   done < "$manifest"
 
-  # Look up task dir and run for this array index. Format: INDEX<TAB>RUN<TAB>PATH
+  # Find job block for job_id, then task at task_id. Format: JOB N, DEPENDS ..., INDEX RUN PATH
   local manifest_line run_name
-  manifest_line=$(awk -F'\t' -v id="$task_id" '$1==id {print; exit}' "$manifest")
+  manifest_line=$(awk -F'\t' -v jid="$job_id" -v tid="$task_id" '
+    /^JOB\t/ { cur=$2; next }
+    /^[0-9]+\t/ && cur==jid && $1==tid { print; exit }
+  ' "$manifest")
   if [[ -z "$manifest_line" ]]; then
-    echo "Error: No task found for array index $task_id in manifest $manifest" >&2
+    echo "Error: No task found for job $job_id index $task_id in manifest $manifest" >&2
     return 1
   fi
   run_name=$(echo "$manifest_line" | awk -F'\t' '{print $2}')
@@ -505,8 +696,8 @@ main() {
   expand_run_spec "$RUN_SPEC" RUNS
 
   # Array execution mode: workload manager invokes us for a single array element
-  if [[ -n "$ARRAY_MANIFEST" && -n "$ARRAY_TASK_ID" ]]; then
-    run_array_task "$ARRAY_MANIFEST" "$ARRAY_TASK_ID"
+  if [[ -n "$ARRAY_MANIFEST" && -n "$ARRAY_JOB_ID" && -n "$ARRAY_TASK_ID" ]]; then
+    run_array_task "$ARRAY_MANIFEST" "$ARRAY_JOB_ID" "$ARRAY_TASK_ID"
     exit $?
   fi
 
@@ -605,49 +796,62 @@ main() {
 
     local total=${#tasks[@]}
 
-    # Workload manager path: create manifest, submit job array, exit
+    # Workload manager path: create manifest, invoke workload manager (single arg)
     if [[ -n "$WORKLOAD_MANAGER_SCRIPT" ]]; then
-      local wm_script manifest_path total_ops
+      local wm_script manifest_path
       wm_script="$WORKLOAD_MANAGER_SCRIPT"
       [[ "$wm_script" != /* ]] && wm_script="$REPOSITORY_ROOT/$wm_script"
       if [[ ! -f "$wm_script" ]]; then
         echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
         exit 1
       fi
-      total_ops=$((${#tasks[@]} * ${#RUNS[@]}))
       if [[ "$DRY_RUN" == true ]]; then
-        echo "Would create manifest and call: $wm_script <manifest> $total_ops"
+        echo "Would create manifest and call: $wm_script <manifest>"
         exit 0
       fi
       manifest_path=$(create_manifest tasks RUNS)
       export REPOSITORY_ROOT
       [[ -n "$JOB_NAME" ]] && export JOB_NAME
       [[ -n "$WALLTIME" ]] && export WALLTIME
-      bash "$wm_script" "$manifest_path" "$total_ops"
+      bash "$wm_script" "$manifest_path"
       exit $?
     fi
 
-    # Direct execution: run each task for each run with progress output
+    # Direct execution: run stages sequentially, then (run × task) within each stage
+    declare -A task_stage
+    local max_stage=0
+    compute_stages tasks task_stage max_stage
+
+    local total_ops=0
+    local stage task_dir run_name
+    for stage in $(seq 0 "$max_stage"); do
+      for task_dir in "${tasks[@]}"; do
+        [[ "${task_stage[$task_dir]:--1}" == "$stage" ]] && total_ops=$((total_ops + ${#RUNS[@]}))
+      done
+    done
+
     local current=0
-    local total_ops=$((${#tasks[@]} * ${#RUNS[@]}))
     local succeeded=0
     local failed=0
 
-    echo "Running $total_ops run(s) across $total task(s)..."
-    for run_name in "${RUNS[@]}"; do
-      for task_dir in "${tasks[@]}"; do
-        current=$((current + 1))
-        local rel_path="${task_dir#$TASKS_DIR/}"
-        printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
-        if [[ "$DRY_RUN" == true ]]; then
-          echo -e "\033[0;90mDRY RUN\033[0m"
-        elif run_task "$task_dir" "$run_name"; then
-          echo -e "\033[0;32mSUCCESS\033[0m"
-          succeeded=$((succeeded + 1))
-        else
-          echo -e "\033[0;31mFAILED\033[0m"
-          failed=$((failed + 1))
-        fi
+    echo "Running $total_ops run(s) across $total task(s) in $((max_stage + 1)) stage(s)..."
+    for stage in $(seq 0 "$max_stage"); do
+      for run_name in "${RUNS[@]}"; do
+        for task_dir in "${tasks[@]}"; do
+          [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+          current=$((current + 1))
+          local rel_path="${task_dir#$TASKS_DIR/}"
+          printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
+          if [[ "$DRY_RUN" == true ]]; then
+            echo -e "\033[0;90mDRY RUN\033[0m"
+          elif run_task "$task_dir" "$run_name"; then
+            echo -e "\033[0;32mSUCCESS\033[0m"
+            succeeded=$((succeeded + 1))
+          else
+            echo -e "\033[0;31mFAILED\033[0m"
+            failed=$((failed + 1))
+          fi
+        done
       done
     done
     if [[ "$DRY_RUN" == true ]]; then
