@@ -40,6 +40,7 @@ Used to run tasks.
 | `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script |
 | `--job-name=NAME` | Job name for workload manager |
 | `--walltime=TIME` | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
+| `--skip-succeeded` | Skip task runs that have already succeeded (`.success` exists). |
 | `--skip-verify-def` | Skip verification that container `.sif` matches `containers/*.def` |
 
 **Examples:**

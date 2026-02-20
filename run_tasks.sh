@@ -12,6 +12,7 @@ RUN_PROVIDED=false
 declare -a RUNS=()
 DRY_RUN=false
 CLEAN=false
+SKIP_SUCCEEDED=false
 SKIP_VERIFY_DEF=false
 WORKLOAD_MANAGER_SCRIPT=""
 JOB_NAME=""
@@ -41,6 +42,7 @@ Options:
   --job-name=NAME        Set job name for workload manager (default: run_tasks)
   --walltime=TIME        Set walltime for workload manager (e.g. 1:00:00, 5:00:00)
   --workload-manager=SCRIPT  Submit tasks as job array via workload manager script
+  --skip-succeeded       Skip task runs that have already succeeded (.success exists)
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
   -h, --help             Show this help
 
@@ -89,6 +91,10 @@ parse_args() {
         ARRAY_TASK_ID="${1#--array-task-id=}"
         shift
         ;;
+      --skip-succeeded)
+        SKIP_SUCCEEDED=true
+        shift
+        ;;
       --skip-verify-def)
         SKIP_VERIFY_DEF=true
         shift
@@ -107,6 +113,13 @@ parse_args() {
         ;;
     esac
   done
+}
+
+# Check if a task run has already succeeded (has .success file).
+is_task_succeeded() {
+  local task_dir="$1"
+  local run_name="$2"
+  [[ -f "$task_dir/$run_name/.success" ]]
 }
 
 # Expand RUN_SPEC to array of run names. Each comma-separated entry is either:
@@ -453,33 +466,36 @@ create_manifest() {
       echo "$ov"
     done
     echo "---"
-    local stage job_id task_dir run_name i
+    local stage job_id task_dir run_name i prev_job_id=-1
     for stage in $(seq 0 "$max_stage"); do
       local stage_tasks=()
       for task_dir in "${_tasks[@]}"; do
         [[ "${task_stage[$task_dir]:--1}" == "$stage" ]] && stage_tasks+=("$task_dir")
       done
       [[ ${#stage_tasks[@]} -eq 0 ]] && continue
-      job_id=$stage
-      echo "JOB	$job_id"
-      local dep_jobs=()
-      for task_dir in "${stage_tasks[@]}"; do
-        for dep in ${deps["$task_dir"]}; do
-          [[ -z "$dep" ]] && continue
-          local dep_stage="${task_stage[$dep]:--1}"
-          [[ "$dep_stage" -lt "$stage" ]] && dep_jobs+=("$dep_stage")
-        done
-      done
-      local dep_list
-      dep_list=$(printf '%s\n' "${dep_jobs[@]}" | sort -nu | tr '\n' ',' | sed 's/,$//')
-      echo "DEPENDS	$dep_list"
-      i=0
+      # Build (task, run) pairs for this stage; when SKIP_SUCCEEDED, exclude already-succeeded runs
+      local pairs=()
       for run_name in "${_runs[@]}"; do
         for task_dir in "${stage_tasks[@]}"; do
-          printf '%d\t%s\t%s\n' "$i" "$run_name" "$task_dir"
-          i=$((i + 1))
+          if [[ "$SKIP_SUCCEEDED" != true ]] || ! is_task_succeeded "$task_dir" "$run_name"; then
+            pairs+=("$task_dir	$run_name")
+          fi
         done
       done
+      [[ ${#pairs[@]} -eq 0 ]] && continue
+      job_id=$((prev_job_id + 1))
+      echo "JOB	$job_id"
+      local dep_list=""
+      [[ $prev_job_id -ge 0 ]] && dep_list="$prev_job_id"
+      echo "DEPENDS	$dep_list"
+      i=0
+      for pair in "${pairs[@]}"; do
+        task_dir="${pair%%	*}"
+        run_name="${pair#*	}"
+        printf '%d\t%s\t%s\n' "$i" "$run_name" "$task_dir"
+        i=$((i + 1))
+      done
+      prev_job_id=$job_id
     done
   } > "$manifest_path"
 
@@ -810,6 +826,10 @@ main() {
         exit 0
       fi
       manifest_path=$(create_manifest tasks RUNS)
+      if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
+        echo "All tasks already succeeded, nothing to submit."
+        exit 0
+      fi
       log_dir="$(dirname "$manifest_path")"
       export REPOSITORY_ROOT
       [[ -n "$JOB_NAME" ]] && export JOB_NAME
@@ -834,6 +854,7 @@ main() {
     local current=0
     local succeeded=0
     local failed=0
+    local skipped=0
 
     echo "Running $total_ops run(s) across $total task(s) in $((max_stage + 1)) stage(s)..."
     for stage in $(seq 0 "$max_stage"); do
@@ -845,6 +866,9 @@ main() {
           printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
           if [[ "$DRY_RUN" == true ]]; then
             echo -e "\033[0;90mDRY RUN\033[0m"
+          elif [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
+            echo -e "\033[0;33mSKIPPED\033[0m"
+            skipped=$((skipped + 1))
           elif run_task "$task_dir" "$run_name"; then
             echo -e "\033[0;32mSUCCESS\033[0m"
             succeeded=$((succeeded + 1))
@@ -858,7 +882,9 @@ main() {
     if [[ "$DRY_RUN" == true ]]; then
       echo "Finished. $total_ops run(s) (dry run)."
     else
-      echo "Finished with $succeeded successes and $failed failures."
+      local summary="Finished with $succeeded successes and $failed failures."
+      [[ $skipped -gt 0 ]] && summary="$summary $skipped already succeeded (skipped)."
+      echo "$summary"
     fi
     exit $((failed > 0 ? 1 : 0))
   fi
