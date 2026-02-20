@@ -441,7 +441,8 @@ run_task() {
         echo "Error: Definition file not found: $def_path; cannot verify container. Use --skip-verify-def to run anyway." >&2
         return 1
       fi
-      if ! diff -q <(apptainer inspect --deffile "$container_path") "$def_path" >/dev/null 2>&1; then
+      normalize_def() { sed -e 's/^[bB]ootstrap:/Bootstrap:/' -e 's/^[fF]rom:/From:/'; }
+      if ! diff -q <(apptainer inspect --deffile "$container_path" | normalize_def) <(normalize_def < "$def_path") >/dev/null 2>&1; then
         echo "Error: Container $container_path was not built from $def_path (definitions differ). Rebuild with: apptainer build $container_path $def_path. Use --skip-verify-def to run anyway." >&2
         return 1
       fi
