@@ -415,49 +415,127 @@ get_task_depends() {
 }
 
 # Compute stages from task dependencies. Populates _task_stage[path]=stage_id.
-# Sets _max_stage to max stage id (stages are 0.._max_stage). Errors on cycle or invalid dep.
+# Sets _max_stage to max stage id (stages are 0.._max_stage).
+# Populates _task_dep_checks with per-task dependency checks for inter-stage verification.
+# Each TASK_DEPENDS entry may include a run suffix (e.g. :local, :run:1:10, :run*).
+# A dependency is resolved if it is in the current invocation or has .success on disk.
 compute_stages() {
   local -n _tasks=$1
-  local -n _task_stage=$2
-  local -n _max_stage=$3
+  local -n _task_run_pairs_ref=$2
+  local -n _task_stage=$3
+  local -n _max_stage=$4
+  local -n _task_dep_checks=$5
   _task_stage=()
+  _task_dep_checks=()
 
-  # Build dependency map: task -> list of tasks it depends on (absolute paths)
-  # Check that all dependencies are in the invocation; collect missing ones and error clearly
+  # Build invocation lookup structures from TASK_RUN_PAIRS
+  declare -A invocation_pair_set
+  declare -A invocation_task_set
+  local pair td rn
+  for pair in "${_task_run_pairs_ref[@]}"; do
+    td="${pair%%	*}"
+    rn="${pair#*	}"
+    invocation_pair_set["$td	$rn"]=1
+    invocation_task_set["$td"]=1
+  done
+
+  # Build dependency map: task -> list of dep tasks (for DAG, deduplicated)
+  # Validate that each dependency is resolved (in invocation or .success on disk)
   declare -A deps
+  declare -A dep_edges_added
   declare -A missing_deps
   local missing_count=0
-  local task_dir dep_pattern resolved r
+  local task_dir dep_entry
   for task_dir in "${_tasks[@]}"; do
     deps["$task_dir"]=""
-    local dep_patterns=()
-    get_task_depends "$task_dir" dep_patterns
-    for dep_pattern in "${dep_patterns[@]}"; do
-      resolved=()
+    local dep_entries=()
+    get_task_depends "$task_dir" dep_entries
+    for dep_entry in "${dep_entries[@]}"; do
+      local parsed
+      set -f
+      parsed=($(parse_task_spec "$dep_entry"))
+      set +f
+      local dep_task_path="${parsed[0]}"
+      local dep_run_spec="${parsed[1]:-}"
+
+      local resolved=() r
       while IFS= read -r r; do
         [[ -n "$r" ]] && resolved+=("$r")
-      done < <(resolve_arg "$dep_pattern" "$REPOSITORY_ROOT")
+      done < <(resolve_arg "$dep_task_path" "$REPOSITORY_ROOT")
+
       for r in "${resolved[@]}"; do
-        local found=false
-        for t in "${_tasks[@]}"; do
-          [[ "$t" == "$r" ]] && { found=true; break; }
-        done
-        if [[ "$found" != true ]]; then
-          local rel_task="${task_dir#$TASKS_DIR/}"
-          missing_deps["$r"]="${missing_deps["$r"]:+${missing_deps["$r"]}, }tasks/$rel_task"
-          missing_count=$((missing_count + 1))
-        else
+        # Add task-level DAG edge (deduplicated, only for dep tasks in the invocation)
+        local edge_key="$task_dir	$r"
+        if [[ -z "${dep_edges_added["$edge_key"]+x}" ]] && [[ -n "${invocation_task_set["$r"]+x}" ]]; then
           deps["$task_dir"]+=" $r"
+          dep_edges_added["$edge_key"]=1
+        fi
+
+        if [[ -z "$dep_run_spec" ]]; then
+          # No run_spec: any run of dep task must eventually succeed
+          local resolved_ok=false
+          if [[ -n "${invocation_task_set["$r"]+x}" ]]; then
+            resolved_ok=true
+          else
+            shopt -s nullglob
+            local rf
+            for rf in "$r"/*/; do
+              [[ -d "$rf" && -f "$rf/.success" ]] && { resolved_ok=true; break; }
+            done
+            shopt -u nullglob
+          fi
+          if [[ "$resolved_ok" != true ]]; then
+            local rel_task="${task_dir#$TASKS_DIR/}"
+            local rel_dep="${r#$TASKS_DIR/}"
+            missing_deps["tasks/$rel_dep"]="${missing_deps["tasks/$rel_dep"]:+${missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
+            missing_count=$((missing_count + 1))
+          fi
+          _task_dep_checks["$task_dir"]+="ANY	$r"$'\n'
+
+        elif [[ "$dep_run_spec" == *"*"* || "$dep_run_spec" == *"?"* ]]; then
+          # Wildcard: expand against existing folders on disk
+          local -a matched_runs=()
+          expand_run_spec_for_clean "$r" "$dep_run_spec" matched_runs
+          if [[ ${#matched_runs[@]} -eq 0 ]]; then
+            local rel_task="${task_dir#$TASKS_DIR/}"
+            local rel_dep="${r#$TASKS_DIR/}"
+            local dep_label="tasks/$rel_dep:$dep_run_spec (no matching run folders on disk)"
+            missing_deps["$dep_label"]="${missing_deps["$dep_label"]:+${missing_deps["$dep_label"]}, }tasks/$rel_task"
+            missing_count=$((missing_count + 1))
+          else
+            for rn in "${matched_runs[@]}"; do
+              if [[ -z "${invocation_pair_set["$r	$rn"]+x}" ]] && [[ ! -f "$r/$rn/.success" ]]; then
+                local rel_task="${task_dir#$TASKS_DIR/}"
+                local rel_dep="${r#$TASKS_DIR/}"
+                missing_deps["tasks/$rel_dep:$rn"]="${missing_deps["tasks/$rel_dep:$rn"]:+${missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
+                missing_count=$((missing_count + 1))
+              fi
+              _task_dep_checks["$task_dir"]+="RUN	$r	$rn"$'\n'
+            done
+          fi
+
+        else
+          # Literal/range: expand and validate each run
+          local -a dep_runs=()
+          expand_run_spec "$dep_run_spec" dep_runs
+          for rn in "${dep_runs[@]}"; do
+            if [[ -z "${invocation_pair_set["$r	$rn"]+x}" ]] && [[ ! -f "$r/$rn/.success" ]]; then
+              local rel_task="${task_dir#$TASKS_DIR/}"
+              local rel_dep="${r#$TASKS_DIR/}"
+              missing_deps["tasks/$rel_dep:$rn"]="${missing_deps["tasks/$rel_dep:$rn"]:+${missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
+              missing_count=$((missing_count + 1))
+            fi
+            _task_dep_checks["$task_dir"]+="RUN	$r	$rn"$'\n'
+          done
         fi
       done
     done
   done
 
   if [[ $missing_count -gt 0 ]]; then
-    echo "Error: The following dependencies are not part of the current invocation:" >&2
+    echo "Error: The following dependencies are neither in the current invocation nor satisfied on disk:" >&2
     for dep in "${!missing_deps[@]}"; do
-      local rel_dep="${dep#$TASKS_DIR/}"
-      echo "  - tasks/$rel_dep" >&2
+      echo "  - $dep" >&2
       echo "    required by:" >&2
       local req
       for req in $(echo "${missing_deps[$dep]}" | tr ',' '\n' | sed 's/^ *//;s/ *$//'); do
@@ -465,7 +543,7 @@ compute_stages() {
       done
     done
     echo "" >&2
-    echo "Include these tasks in your invocation or run the dependencies first." >&2
+    echo "Include these dependency runs in your invocation or run them first." >&2
     exit 1
   fi
 
@@ -520,6 +598,61 @@ compute_stages() {
   _max_stage=$((stage - 1))
 }
 
+# Verify that all dependency runs for tasks in a given stage have .success files.
+# Aborts the pipeline if any dependency is unsatisfied.
+check_stage_deps() {
+  local stage=$1
+  local -n _csd_tasks=$2
+  local -n _csd_task_stage=$3
+  local -n _csd_dep_checks=$4
+
+  local -a unsatisfied=()
+  local task_dir
+  for task_dir in "${_csd_tasks[@]}"; do
+    [[ "${_csd_task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+    local checks="${_csd_dep_checks[$task_dir]:-}"
+    [[ -z "$checks" ]] && continue
+    while IFS= read -r check; do
+      [[ -z "$check" ]] && continue
+      local check_type rest dep_dir dep_run
+      check_type="${check%%	*}"
+      rest="${check#*	}"
+      if [[ "$check_type" == "ANY" ]]; then
+        dep_dir="$rest"
+        local any_ok=false
+        shopt -s nullglob
+        local rf
+        for rf in "$dep_dir"/*/; do
+          [[ -f "$rf/.success" ]] && { any_ok=true; break; }
+        done
+        shopt -u nullglob
+        if [[ "$any_ok" != true ]]; then
+          local rel_dep="${dep_dir#$TASKS_DIR/}"
+          local rel_task="${task_dir#$TASKS_DIR/}"
+          unsatisfied+=("tasks/$rel_dep (no successful run) required by tasks/$rel_task")
+        fi
+      elif [[ "$check_type" == "RUN" ]]; then
+        dep_dir="${rest%%	*}"
+        dep_run="${rest#*	}"
+        if [[ ! -f "$dep_dir/$dep_run/.success" ]]; then
+          local rel_dep="${dep_dir#$TASKS_DIR/}"
+          local rel_task="${task_dir#$TASKS_DIR/}"
+          unsatisfied+=("tasks/$rel_dep/$dep_run required by tasks/$rel_task")
+        fi
+      fi
+    done <<< "$checks"
+  done
+
+  if [[ ${#unsatisfied[@]} -gt 0 ]]; then
+    echo "" >&2
+    echo "Error: Unsatisfied dependencies before stage $stage:" >&2
+    for u in "${unsatisfied[@]}"; do
+      echo "  - $u" >&2
+    done
+    exit 1
+  fi
+}
+
 # --- Manifest (for workload manager job arrays) ---
 # Creates a single manifest file with multiple jobs, each with tasks and dependencies.
 # Format: header (SKIP_VERIFY_DEF, env overrides, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH.
@@ -530,8 +663,9 @@ create_manifest() {
   local manifest_path job_safe inv_dir n
 
   declare -A task_stage
+  declare -A task_dep_checks
   local max_stage=0
-  compute_stages "$2" task_stage max_stage
+  compute_stages "$2" "$1" task_stage max_stage task_dep_checks
 
   job_safe="${JOB_NAME:-run_tasks}"
   job_safe="${job_safe//[\/ ]/_}"
@@ -879,8 +1013,9 @@ main() {
 
     # Direct execution: run stages sequentially, then (task, run) pairs within each stage
     declare -A task_stage
+    declare -A task_dep_checks
     local max_stage=0
-    compute_stages TASKS_UNIQUE task_stage max_stage
+    compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks
 
     local total_ops=${#TASK_RUN_PAIRS[@]}
     local current=0
@@ -892,6 +1027,7 @@ main() {
     for stage in $(seq 0 "$max_stage"); do
       echo ""
       echo "--- Stage $stage ---"
+      [[ "$DRY_RUN" != true ]] && check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks
       local pair
       for pair in "${TASK_RUN_PAIRS[@]}"; do
         local task_dir="${pair%%	*}"

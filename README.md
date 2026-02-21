@@ -61,7 +61,13 @@ Tasks are defined as a tree under `tasks/`. Each task is a directory containing 
 - **Tree structure:** Directories under `tasks/` form a hierarchy; any dir with `task.sh` is a task.
 - **env files:** `env.sh`, `env_host.sh`, and `env_container.sh` may appear along the path from `tasks/` to a task. They are sourced in root-to-leaf order before `task.sh` runs. `env_host.sh` is used on the host; `env_container.sh` inside the container. Optionally set `CONTAINER` to a `.sif` file in `containers/` to run the task inside that container.
 - **Paths:** Use `$REPOSITORY_ROOT` and `$RUN_FOLDER` for paths. Reference assets and containers relative to `$REPOSITORY_ROOT`. Task output goes to `$RUN_FOLDER`.
-- **Dependencies:** Optionally set `TASK_DEPENDS` (array of task path patterns) in `env.sh` to declare dependencies. The runner orders the tasks of the current invocation by dependency. If a task depends on another task that is not part of the invocation, the runner does not run the missing tasks; it fails with an error listing the missing dependencies.
+- **Dependencies:** Optionally set `TASK_DEPENDS` (array of dependency specs) in `env.sh` to declare dependencies. Each entry is a task path with an optional `:RUN_SPEC` suffix:
+  - `tasks/task1` -- depends on any successful run of task1 (at least one `.success` must exist)
+  - `tasks/task1:local` -- depends on the `local` run of task1
+  - `tasks/task1:run:1:10` -- depends on runs `run1` through `run10` of task1
+  - `"tasks/task1:run*"` -- depends on all runs matching `run*` on disk (quote to prevent shell glob expansion)
+
+  A dependency is resolved if it is in the current invocation or already has a `.success` file on disk. If neither holds, the runner fails with an error listing the unresolved dependencies. Between stages, the runner verifies that all dependency runs have `.success` files before proceeding.
 
 ### Assets
 
