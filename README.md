@@ -36,7 +36,7 @@ Optional suffix `:RUN_SPEC` sets run(s). Examples: `:local`, `:run:1:10`, `:run*
 
 | Option | Description |
 |--------|-------------|
-| `--dry-run` | Print tasks only, do not run |
+| `--dry-run` | Create manifest without running; print manifest contents to stdout |
 | `--clean` | Remove output folders for specified tasks |
 | `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script |
 | `--job-name=NAME` | Job name for workload manager |

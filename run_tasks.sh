@@ -37,7 +37,7 @@ Execute tasks. TASK can be:
   Quote the task spec if RUN_SPEC contains * or ? (e.g. "tasks/task1:run*").
 
 Options:
-  --dry-run              Print tasks only, do not run
+  --dry-run              Create manifest without running (no workload manager submit)
   --clean                Remove output folders for specified tasks, do not run
   --job-name=NAME        Set job name for workload manager (default: run_tasks)
   --walltime=TIME        Set walltime for workload manager (e.g. 1:00:00, 5:00:00)
@@ -1030,11 +1030,11 @@ main() {
         echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
         exit 1
       fi
+      manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
       if [[ "$DRY_RUN" == true ]]; then
-        echo "Would create manifest and call: $wm_script <manifest> <log_dir>"
+        cat "$manifest_path"
         exit 0
       fi
-      manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
       if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
         echo "All tasks already succeeded, nothing to submit."
         exit 0
@@ -1047,11 +1047,18 @@ main() {
       exit $?
     fi
 
-    # Direct execution: run stages sequentially, then (task, run) pairs within each stage
+    # Direct execution: create manifest (for audit), run stages sequentially, then (task, run) pairs within each stage
     declare -A task_stage
     declare -A task_dep_checks
     local max_stage=0
     compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks
+
+    local manifest_path
+    manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
+    if [[ "$DRY_RUN" == true ]]; then
+      cat "$manifest_path"
+      exit 0
+    fi
 
     local total_ops=${#TASK_RUN_PAIRS[@]}
     local current=0
@@ -1063,7 +1070,7 @@ main() {
     for stage in $(seq 0 "$max_stage"); do
       echo ""
       echo "--- Stage $stage ---"
-      [[ "$DRY_RUN" != true ]] && check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks TASK_RUN_PAIRS
+      check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks TASK_RUN_PAIRS
       local pair
       for pair in "${TASK_RUN_PAIRS[@]}"; do
         local task_dir="${pair%%	*}"
@@ -1072,9 +1079,7 @@ main() {
         current=$((current + 1))
         local rel_path="${task_dir#$TASKS_DIR/}"
         printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
-        if [[ "$DRY_RUN" == true ]]; then
-          echo -e "\033[0;90mDRY RUN\033[0m"
-        elif [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
+        if [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
           echo -e "\033[0;33mSKIPPED\033[0m"
           skipped=$((skipped + 1))
         elif run_task "$task_dir" "$run_name"; then
@@ -1087,13 +1092,9 @@ main() {
       done
     done
     echo
-    if [[ "$DRY_RUN" == true ]]; then
-      echo "Finished with $total_ops run(s) (dry run)."
-    else
-      local summary="Finished with $succeeded successes and $failed failures."
-      [[ $skipped -gt 0 ]] && summary="$summary $skipped already succeeded (skipped)."
-      echo "$summary"
-    fi
+    local summary="Finished with $succeeded successes and $failed failures."
+    [[ $skipped -gt 0 ]] && summary="$summary $skipped already succeeded (skipped)."
+    echo "$summary"
     exit $((failed > 0 ? 1 : 0))
   fi
 }
