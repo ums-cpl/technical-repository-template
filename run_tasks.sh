@@ -7,9 +7,10 @@ set -euo pipefail
 # --- Configuration ---
 REPOSITORY_ROOT="$(cd "$(dirname "$0")" && pwd)"
 TASKS_DIR="$REPOSITORY_ROOT/tasks"
-RUN_SPEC="assets"
 RUN_PROVIDED=false
-declare -a RUNS=()
+declare -a SEGMENTS=()
+declare -a TASK_RUN_PAIRS=()
+declare -a TASKS_UNIQUE=()
 DRY_RUN=false
 CLEAN=false
 SKIP_SUCCEEDED=false
@@ -21,7 +22,6 @@ ARRAY_MANIFEST=""
 ARRAY_JOB_ID=""
 ARRAY_TASK_ID=""
 declare -a ENV_OVERRIDES=()
-declare -a TASK_ARGS=()
 
 # --- Usage ---
 usage() {
@@ -36,8 +36,8 @@ Execute tasks. TASK can be:
 Options:
   --dry-run              Print tasks only, do not run
   --clean                Remove output folders for specified tasks, do not run
-  --run=SPEC             Set run(s) (default: assets). Comma-separated list; each entry is either
-                         prefix:start:end (e.g. run:1:10 for run1..run10) or a literal name (e.g. local).
+  --run=SPEC             Set run(s) for following tasks (default: assets). May appear multiple times.
+                         SPEC: comma-separated; each entry is prefix:start:end (e.g. run:1:10) or a literal (e.g. assets).
                          With --clean, if omitted, cleans all run folders.
   --job-name=NAME        Set job name for workload manager (default: run_tasks)
   --walltime=TIME        Set walltime for workload manager (e.g. 1:00:00, 5:00:00)
@@ -52,6 +52,9 @@ EOF
 
 # --- Argument parsing ---
 parse_args() {
+  local current_run="assets"
+  local current_batch=()
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run)
@@ -63,7 +66,11 @@ parse_args() {
         shift
         ;;
       --run=*)
-        RUN_SPEC="${1#--run=}"
+        if [[ ${#current_batch[@]} -gt 0 ]]; then
+          SEGMENTS+=("$current_run|$(IFS='|'; echo "${current_batch[*]}")")
+          current_batch=()
+        fi
+        current_run="${1#--run=}"
         RUN_PROVIDED=true
         shift
         ;;
@@ -108,11 +115,15 @@ parse_args() {
         shift
         ;;
       *)
-        TASK_ARGS+=("$1")
+        current_batch+=("$1")
         shift
         ;;
     esac
   done
+
+  if [[ ${#current_batch[@]} -gt 0 ]]; then
+    SEGMENTS+=("$current_run|$(IFS='|'; echo "${current_batch[*]}")")
+  fi
 }
 
 # Check if a task run has already succeeded (has .success file).
@@ -147,6 +158,55 @@ expand_run_spec() {
     fi
   done
   IFS="$old_ifs"
+}
+
+# Build TASK_RUN_PAIRS and TASKS_UNIQUE from SEGMENTS.
+# TASK_RUN_PAIRS: array of "task_dir<TAB>run_name"
+# TASKS_UNIQUE: deduplicated task dirs for stage computation
+build_task_run_pairs() {
+  TASK_RUN_PAIRS=()
+  TASKS_UNIQUE=()
+  local seen=""
+
+  local segment run_spec args_str
+  local -a args=() runs=()
+  local arg task_dir run_name
+
+  for segment in "${SEGMENTS[@]}"; do
+    run_spec="${segment%%|*}"
+    args_str="${segment#*|}"
+    [[ -z "$args_str" ]] && continue
+
+    IFS='|' read -ra args <<< "$args_str"
+    expand_run_spec "$run_spec" runs
+
+    local -a segment_tasks=()
+    for arg in "${args[@]}"; do
+      [[ -z "$arg" ]] && continue
+      while IFS= read -r task_dir; do
+        [[ -z "$task_dir" ]] && continue
+        if [[ "$task_dir" != "$TASKS_DIR"* ]]; then
+          echo "Error: Task must be under tasks/: $task_dir" >&2
+          exit 1
+        fi
+        if [[ ! -f "$task_dir/task.sh" ]]; then
+          echo "Error: Not a task directory (no task.sh): $task_dir" >&2
+          exit 1
+        fi
+        segment_tasks+=("$task_dir")
+        if [[ "|$seen|" != *"|$task_dir|"* ]]; then
+          seen+="|$task_dir|"
+          TASKS_UNIQUE+=("$task_dir")
+        fi
+      done < <(resolve_arg "$arg" "$REPOSITORY_ROOT")
+    done
+    # Run-first order: run1 for all tasks, then run2 for all tasks, ...
+    for run_name in "${runs[@]}"; do
+      for task_dir in "${segment_tasks[@]}"; do
+        TASK_RUN_PAIRS+=("$task_dir	$run_name")
+      done
+    done
+  done
 }
 
 # --- Task resolution ---
@@ -201,34 +261,6 @@ resolve_arg() {
 
   printf '%s\n' "${resolved[@]}"
   )
-}
-
-# Resolve all task arguments to a deduplicated, sorted list.
-resolve_all_tasks() {
-  local all_tasks=()
-  local seen=""
-
-  for arg in "${TASK_ARGS[@]}"; do
-    while IFS= read -r task_dir; do
-      [[ -z "$task_dir" ]] && continue
-      # Validate task is under TASKS_DIR
-      if [[ "$task_dir" != "$TASKS_DIR"* ]]; then
-        echo "Error: Task must be under tasks/: $task_dir" >&2
-        exit 1
-      fi
-      if [[ ! -f "$task_dir/task.sh" ]]; then
-        echo "Error: Not a task directory (no task.sh): $task_dir" >&2
-        exit 1
-      fi
-      if [[ "|$seen|" != *"|$task_dir|"* ]]; then
-        seen+="|$task_dir|"
-        all_tasks+=("$task_dir")
-      fi
-    done < <(resolve_arg "$arg" "$REPOSITORY_ROOT")
-  done
-
-  # Sort for stable ordering
-  printf '%s\n' "${all_tasks[@]}" | sort -u
 }
 
 # --- Environment building ---
@@ -426,26 +458,13 @@ compute_stages() {
 # Format: header (SKIP_VERIFY_DEF, env overrides, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH.
 RUN_TASKS_OUTPUT_ROOT="$REPOSITORY_ROOT/workload_logs"
 create_manifest() {
-  local -n _tasks=$1
-  local -n _runs=$2
+  local -n _task_run_pairs=$1
+  local -n _tasks_unique=$2
   local manifest_path job_safe inv_dir n
 
   declare -A task_stage
   local max_stage=0
-  compute_stages "$1" task_stage max_stage
-
-  # Build task deps for job dependency computation
-  declare -A deps
-  local task_dir dep_patterns=() resolved r
-  for task_dir in "${_tasks[@]}"; do
-    deps["$task_dir"]=""
-    get_task_depends "$task_dir" dep_patterns
-    for dep_pattern in "${dep_patterns[@]}"; do
-      while IFS= read -r r; do
-        [[ -n "$r" ]] && deps["$task_dir"]+=" $r"
-      done < <(resolve_arg "$dep_pattern" "$REPOSITORY_ROOT")
-    done
-  done
+  compute_stages "$2" task_stage max_stage
 
   job_safe="${JOB_NAME:-run_tasks}"
   job_safe="${job_safe//[\/ ]/_}"
@@ -468,19 +487,16 @@ create_manifest() {
     echo "---"
     local stage job_id task_dir run_name i prev_job_id=-1
     for stage in $(seq 0 "$max_stage"); do
-      local stage_tasks=()
-      for task_dir in "${_tasks[@]}"; do
-        [[ "${task_stage[$task_dir]:--1}" == "$stage" ]] && stage_tasks+=("$task_dir")
-      done
-      [[ ${#stage_tasks[@]} -eq 0 ]] && continue
-      # Build (task, run) pairs for this stage; when SKIP_SUCCEEDED, exclude already-succeeded runs
+      # Build (task, run) pairs for this stage from _task_run_pairs; when SKIP_SUCCEEDED, exclude already-succeeded runs
       local pairs=()
-      for run_name in "${_runs[@]}"; do
-        for task_dir in "${stage_tasks[@]}"; do
-          if [[ "$SKIP_SUCCEEDED" != true ]] || ! is_task_succeeded "$task_dir" "$run_name"; then
-            pairs+=("$task_dir	$run_name")
-          fi
-        done
+      local pair
+      for pair in "${_task_run_pairs[@]}"; do
+        task_dir="${pair%%	*}"
+        run_name="${pair#*	}"
+        [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+        if [[ "$SKIP_SUCCEEDED" != true ]] || ! is_task_succeeded "$task_dir" "$run_name"; then
+          pairs+=("$task_dir	$run_name")
+        fi
       done
       [[ ${#pairs[@]} -eq 0 ]] && continue
       job_id=$((prev_job_id + 1))
@@ -709,7 +725,6 @@ RUNNER_SCRIPT
 # --- Main ---
 main() {
   parse_args "$@"
-  expand_run_spec "$RUN_SPEC" RUNS
 
   # Array execution mode: workload manager invokes us for a single array element
   if [[ -n "$ARRAY_MANIFEST" && -n "$ARRAY_JOB_ID" && -n "$ARRAY_TASK_ID" ]]; then
@@ -718,55 +733,50 @@ main() {
   fi
 
   # Check if any tasks were specified
-  if [[ ${#TASK_ARGS[@]} -eq 0 ]]; then
+  if [[ ${#SEGMENTS[@]} -eq 0 ]]; then
     echo "Error: No tasks specified." >&2
     usage >&2
     exit 1
   fi
 
+  build_task_run_pairs
+
   if [[ "$CLEAN" == true ]]; then
     # Clean mode: remove output folders only, with progress output
-    local tasks=()
-    local task_dir
-    while IFS= read -r task_dir; do
-      [[ -z "$task_dir" ]] && continue
-      tasks+=("$task_dir")
-    done < <(resolve_all_tasks)
-
-    local total=${#tasks[@]}
-    local current=0
+    local total=${#TASKS_UNIQUE[@]}
 
     if [[ "$RUN_PROVIDED" == true ]]; then
-      local total_ops=$((${#tasks[@]} * ${#RUNS[@]}))
+      local total_ops=${#TASK_RUN_PAIRS[@]}
       echo "Cleaning $total_ops run(s) across $total task(s)$([[ "$DRY_RUN" == true ]] && echo " (dry run)" || true)..."
       local op_counter=0
-      for run_name in "${RUNS[@]}"; do
-        for task_dir in "${tasks[@]}"; do
-          op_counter=$((op_counter + 1))
-          local rel_path="${task_dir#$TASKS_DIR/}"
-          local run_folder="$task_dir/$run_name"
-          printf "[%d/%d] %s/%s ... " "$op_counter" "$total_ops" "$rel_path" "$run_name"
-          if [[ -d "$run_folder" ]]; then
-            if [[ "$DRY_RUN" == true ]]; then
-              echo -e "\033[0;90mDRY RUN\033[0m"
-            else
-              rm -rf "$run_folder"
-              echo -e "\033[0;32mREMOVED\033[0m"
-            fi
+      local pair
+      for pair in "${TASK_RUN_PAIRS[@]}"; do
+        op_counter=$((op_counter + 1))
+        local task_dir="${pair%%	*}"
+        local run_name="${pair#*	}"
+        local rel_path="${task_dir#$TASKS_DIR/}"
+        local run_folder="$task_dir/$run_name"
+        printf "[%d/%d] %s/%s ... " "$op_counter" "$total_ops" "$rel_path" "$run_name"
+        if [[ -d "$run_folder" ]]; then
+          if [[ "$DRY_RUN" == true ]]; then
+            echo -e "\033[0;90mDRY RUN\033[0m"
           else
-            if [[ "$DRY_RUN" == true ]]; then
-              echo -e "\033[0;90mDRY RUN (not found)\033[0m"
-            else
-              echo -e "\033[0;32mREMOVED (not found)\033[0m"
-            fi
+            rm -rf "$run_folder"
+            echo -e "\033[0;32mREMOVED\033[0m"
           fi
-        done
+        else
+          if [[ "$DRY_RUN" == true ]]; then
+            echo -e "\033[0;90mDRY RUN (not found)\033[0m"
+          else
+            echo -e "\033[0;32mREMOVED (not found)\033[0m"
+          fi
+        fi
       done
-      total_runs=$total_ops
+      local total_runs=$total_ops
     else
       shopt -s nullglob
       local total_runs=0
-      for task_dir in "${tasks[@]}"; do
+      for task_dir in "${TASKS_UNIQUE[@]}"; do
         for run_folder in "$task_dir"/*/; do
           [[ -d "$run_folder" ]] && total_runs=$((total_runs + 1))
         done
@@ -774,7 +784,7 @@ main() {
       echo "Cleaning $total_runs run(s) for $total task(s)$([[ "$DRY_RUN" == true ]] && echo " (dry run)" || true)..."
       local run_counter=0
       local task_counter=0
-      for task_dir in "${tasks[@]}"; do
+      for task_dir in "${TASKS_UNIQUE[@]}"; do
         task_counter=$((task_counter + 1))
         local rel_path="${task_dir#$TASKS_DIR/}"
         local run_folder
@@ -803,14 +813,7 @@ main() {
     echo "Cleaned $total_runs run(s) for $total task(s)$([[ "$DRY_RUN" == true ]] && echo " (dry run)" || true)."
     exit 0
   else
-    # Resolve tasks
-    local tasks=()
-    while IFS= read -r task_dir; do
-      [[ -z "$task_dir" ]] && continue
-      tasks+=("$task_dir")
-    done < <(resolve_all_tasks)
-
-    local total=${#tasks[@]}
+    local total=${#TASKS_UNIQUE[@]}
 
     # Workload manager path: create manifest, invoke workload manager (single arg)
     if [[ -n "$WORKLOAD_MANAGER_SCRIPT" ]]; then
@@ -825,7 +828,7 @@ main() {
         echo "Would create manifest and call: $wm_script <manifest> <log_dir>"
         exit 0
       fi
-      manifest_path=$(create_manifest tasks RUNS)
+      manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
       if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
         echo "All tasks already succeeded, nothing to submit."
         exit 0
@@ -838,19 +841,12 @@ main() {
       exit $?
     fi
 
-    # Direct execution: run stages sequentially, then (run × task) within each stage
+    # Direct execution: run stages sequentially, then (task, run) pairs within each stage
     declare -A task_stage
     local max_stage=0
-    compute_stages tasks task_stage max_stage
+    compute_stages TASKS_UNIQUE task_stage max_stage
 
-    local total_ops=0
-    local stage task_dir run_name
-    for stage in $(seq 0 "$max_stage"); do
-      for task_dir in "${tasks[@]}"; do
-        [[ "${task_stage[$task_dir]:--1}" == "$stage" ]] && total_ops=$((total_ops + ${#RUNS[@]}))
-      done
-    done
-
+    local total_ops=${#TASK_RUN_PAIRS[@]}
     local current=0
     local succeeded=0
     local failed=0
@@ -858,25 +854,26 @@ main() {
 
     echo "Running $total_ops run(s) across $total task(s) in $((max_stage + 1)) stage(s)..."
     for stage in $(seq 0 "$max_stage"); do
-      for run_name in "${RUNS[@]}"; do
-        for task_dir in "${tasks[@]}"; do
-          [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
-          current=$((current + 1))
-          local rel_path="${task_dir#$TASKS_DIR/}"
-          printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
-          if [[ "$DRY_RUN" == true ]]; then
-            echo -e "\033[0;90mDRY RUN\033[0m"
-          elif [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
-            echo -e "\033[0;33mSKIPPED\033[0m"
-            skipped=$((skipped + 1))
-          elif run_task "$task_dir" "$run_name"; then
-            echo -e "\033[0;32mSUCCESS\033[0m"
-            succeeded=$((succeeded + 1))
-          else
-            echo -e "\033[0;31mFAILED\033[0m"
-            failed=$((failed + 1))
-          fi
-        done
+      local pair
+      for pair in "${TASK_RUN_PAIRS[@]}"; do
+        local task_dir="${pair%%	*}"
+        local run_name="${pair#*	}"
+        [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+        current=$((current + 1))
+        local rel_path="${task_dir#$TASKS_DIR/}"
+        printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
+        if [[ "$DRY_RUN" == true ]]; then
+          echo -e "\033[0;90mDRY RUN\033[0m"
+        elif [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
+          echo -e "\033[0;33mSKIPPED\033[0m"
+          skipped=$((skipped + 1))
+        elif run_task "$task_dir" "$run_name"; then
+          echo -e "\033[0;32mSUCCESS\033[0m"
+          succeeded=$((succeeded + 1))
+        else
+          echo -e "\033[0;31mFAILED\033[0m"
+          failed=$((failed + 1))
+        fi
       done
     done
     if [[ "$DRY_RUN" == true ]]; then

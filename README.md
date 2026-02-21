@@ -129,7 +129,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 With dependencies declared in `env.sh` (via `TASK_DEPENDS`), the workflow can be submitted as a single command:
 
 ```bash
-./run_tasks.sh tasks/
+./run_tasks.sh tasks/build tasks/experiment/*/*/data --run=run:1:5 "tasks/experiment/*/*/!(data)" --run=assets tasks/plot
 ```
 
 ## Artifact Packing
