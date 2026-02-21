@@ -524,8 +524,14 @@ MANIFEST="$(cd "$(dirname "$0")" && pwd)/manifest"
 echo "Task exit states (from run folders):"
 echo "JOB/IDX  RUN                          PATH                              STATUS "
 echo "-------  ---------------------------  --------------------------------  -------"
+prev_job=""
 while IFS=$'\t' read -r job_id idx run path; do
   [[ -z "$path" ]] && continue
+  if [[ "$job_id" != "$prev_job" ]]; then
+    [[ -n "$prev_job" ]] && echo ""
+    echo "--- Stage $job_id ---"
+    prev_job="$job_id"
+  fi
   run_folder="$path/$run"
   if [[ -f "$run_folder/.success" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.success" ]]; then
     status=$'\033[32mSUCCESS\033[0m'
