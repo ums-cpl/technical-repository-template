@@ -1,1 +1,1 @@
-TASK_DEPENDS=(tasks/build tasks/experiment/MatMul/IS2/data)
+export TASK_DEPENDS=(tasks/build/optimized tasks/experiment/MatMul/IS2/data)

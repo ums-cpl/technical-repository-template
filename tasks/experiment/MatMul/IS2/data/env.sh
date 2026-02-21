@@ -1,0 +1,1 @@
+export TASK_DEPENDS=(tasks/build/data)

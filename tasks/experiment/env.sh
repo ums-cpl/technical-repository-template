@@ -1,2 +1,2 @@
 export BUILD_FOLDER="assets"
-TASK_DEPENDS=(tasks/build)
+export TASK_DEPENDS=(tasks/build)
