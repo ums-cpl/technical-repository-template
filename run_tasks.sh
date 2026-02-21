@@ -419,6 +419,7 @@ get_task_depends() {
 # Populates _task_dep_checks with per-task dependency checks for inter-stage verification.
 # Each TASK_DEPENDS entry may include a run suffix (e.g. :local, :run:1:10, :run*).
 # A dependency is resolved if it is in the current invocation or has .success on disk.
+# For task-only deps (no run spec): all runs on disk must have .success, and at least one run must exist (disk or invocation).
 compute_stages() {
   local -n _tasks=$1
   local -n _task_run_pairs_ref=$2
@@ -472,25 +473,38 @@ compute_stages() {
         fi
 
         if [[ -z "$dep_run_spec" ]]; then
-          # No run_spec: any run of dep task must eventually succeed
+          # No run_spec: all runs (disk and invocation) must succeed; at least one run required
+          local -a disk_runs=()
+          shopt -s nullglob
+          local rf
+          for rf in "$r"/*/; do
+            [[ -d "$rf" ]] && disk_runs+=("$(basename "$rf")")
+          done
+          shopt -u nullglob
+
+          local all_disk_ok=true
+          local rn
+          for rn in "${disk_runs[@]}"; do
+            if [[ ! -f "$r/$rn/.success" ]]; then
+              all_disk_ok=false
+              break
+            fi
+          done
+
+          local has_at_least_one=false
+          [[ -n "${invocation_task_set["$r"]+x}" ]] && has_at_least_one=true
+          [[ ${#disk_runs[@]} -gt 0 ]] && has_at_least_one=true
+
           local resolved_ok=false
-          if [[ -n "${invocation_task_set["$r"]+x}" ]]; then
-            resolved_ok=true
-          else
-            shopt -s nullglob
-            local rf
-            for rf in "$r"/*/; do
-              [[ -d "$rf" && -f "$rf/.success" ]] && { resolved_ok=true; break; }
-            done
-            shopt -u nullglob
-          fi
+          [[ "$all_disk_ok" == true ]] && [[ "$has_at_least_one" == true ]] && resolved_ok=true
+
           if [[ "$resolved_ok" != true ]]; then
             local rel_task="${task_dir#$TASKS_DIR/}"
             local rel_dep="${r#$TASKS_DIR/}"
             missing_deps["tasks/$rel_dep"]="${missing_deps["tasks/$rel_dep"]:+${missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
             missing_count=$((missing_count + 1))
           fi
-          _task_dep_checks["$task_dir"]+="ANY	$r"$'\n'
+          _task_dep_checks["$task_dir"]+="ALL	$r"$'\n'
 
         elif [[ "$dep_run_spec" == *"*"* || "$dep_run_spec" == *"?"* ]]; then
           # Wildcard: expand against existing folders on disk
@@ -605,6 +619,7 @@ check_stage_deps() {
   local -n _csd_tasks=$2
   local -n _csd_task_stage=$3
   local -n _csd_dep_checks=$4
+  local -n _csd_task_run_pairs=$5
 
   local -a unsatisfied=()
   local task_dir
@@ -617,19 +632,40 @@ check_stage_deps() {
       local check_type rest dep_dir dep_run
       check_type="${check%%	*}"
       rest="${check#*	}"
-      if [[ "$check_type" == "ANY" ]]; then
+      if [[ "$check_type" == "ALL" ]]; then
         dep_dir="$rest"
-        local any_ok=false
+        local -a disk_runs=()
         shopt -s nullglob
         local rf
         for rf in "$dep_dir"/*/; do
-          [[ -f "$rf/.success" ]] && { any_ok=true; break; }
+          [[ -d "$rf" ]] && disk_runs+=("$(basename "$rf")")
         done
         shopt -u nullglob
-        if [[ "$any_ok" != true ]]; then
+
+        local -A union_runs=()
+        local rn
+        for rn in "${disk_runs[@]}"; do
+          union_runs["$rn"]=1
+        done
+        local pair td rn_val
+        for pair in "${_csd_task_run_pairs[@]}"; do
+          td="${pair%%	*}"
+          rn_val="${pair#*	}"
+          [[ "$td" == "$dep_dir" ]] && union_runs["$rn_val"]=1
+        done
+
+        if [[ ${#union_runs[@]} -eq 0 ]]; then
           local rel_dep="${dep_dir#$TASKS_DIR/}"
           local rel_task="${task_dir#$TASKS_DIR/}"
-          unsatisfied+=("tasks/$rel_dep (no successful run) required by tasks/$rel_task")
+          unsatisfied+=("tasks/$rel_dep (at least one run required) required by tasks/$rel_task")
+        else
+          for rn in "${!union_runs[@]}"; do
+            if [[ ! -f "$dep_dir/$rn/.success" ]]; then
+              local rel_dep="${dep_dir#$TASKS_DIR/}"
+              local rel_task="${task_dir#$TASKS_DIR/}"
+              unsatisfied+=("tasks/$rel_dep/$rn required by tasks/$rel_task")
+            fi
+          done
         fi
       elif [[ "$check_type" == "RUN" ]]; then
         dep_dir="${rest%%	*}"
@@ -1027,7 +1063,7 @@ main() {
     for stage in $(seq 0 "$max_stage"); do
       echo ""
       echo "--- Stage $stage ---"
-      [[ "$DRY_RUN" != true ]] && check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks
+      [[ "$DRY_RUN" != true ]] && check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks TASK_RUN_PAIRS
       local pair
       for pair in "${TASK_RUN_PAIRS[@]}"; do
         local task_dir="${pair%%	*}"
