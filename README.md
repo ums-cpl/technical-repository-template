@@ -61,7 +61,7 @@ Tasks are defined as a tree under `tasks/`. Each task is a directory containing 
 - **Tree structure:** Directories under `tasks/` form a hierarchy; any dir with `task.sh` is a task.
 - **env files:** `env.sh`, `env_host.sh`, and `env_container.sh` may appear along the path from `tasks/` to a task. They are sourced in root-to-leaf order before `task.sh` runs. `env_host.sh` is used on the host; `env_container.sh` inside the container. Optionally set `CONTAINER` to a `.sif` file in `containers/` to run the task inside that container.
 - **Paths:** Use `$REPOSITORY_ROOT` and `$RUN_FOLDER` for paths. Reference assets and containers relative to `$REPOSITORY_ROOT`. Task output goes to `$RUN_FOLDER`.
-- **Dependencies:** Optionally set `TASK_DEPENDS` (array of dependency specs) in `env.sh` to declare dependencies. Each entry is a task path with an optional `:RUN_SPEC` suffix:
+- **Dependencies:** Optionally create `depends.sh` next to `env.sh` and set `TASK_DEPENDS` (array of dependency specs). `depends.sh` is sourced after `env.sh`, `env_host.sh`, and command-line overrides (KEY=VALUE), so variables like `$BUILD_FOLDER` and overrides are available in dependency specs. Each entry is a task path with an optional `:RUN_SPEC` suffix:
   - `tasks/task1` -- depends on all runs of task1 (disk and invocation): every run must have `.success`, and at least one run must exist
   - `tasks/task1:local` -- depends on the `local` run of task1
   - `tasks/task1:run:1:10` -- depends on runs `run1` through `run10` of task1
@@ -133,7 +133,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 ./run_tasks.sh --clean tasks
 ```
 
-With dependencies declared in `env.sh` (via `TASK_DEPENDS`), the workflow can be submitted as a single command:
+With dependencies declared in `depends.sh` (via `TASK_DEPENDS`), the workflow can be submitted as a single command:
 
 ```bash
 ./run_tasks.sh tasks/build tasks/experiment/*/*/data "tasks/experiment/*/*/!(data):run:1:5" tasks/plot
