@@ -30,13 +30,14 @@ Used to run tasks.
 - A parent directory (recursively finds all descendant dirs with `task.sh`)
 - A wildcard (e.g. `tasks/.../*`; use `"!(pattern)"` to exclude)
 
+Optional suffix `:RUN_SPEC` sets run(s). Examples: `:local`, `:run:1:10`, `:run*` (clean only, wildcard). Without suffix: default run `assets` for execute; cleans all runs with `--clean`.
+
 **Options:**
 
 | Option | Description |
 |--------|-------------|
 | `--dry-run` | Print tasks only, do not run |
 | `--clean` | Remove output folders for specified tasks |
-| `--run=SPEC` | Set run(s) (default: `assets`). Comma-separated; each entry is `prefix:start:end` (e.g. `run:1:10` for `run1`, `run2`, ..., `run10`) or a literal (e.g. `local`). Each run uses a separate output folder, allowing multiple executions (e.g. for averaging or running on different machines). |
 | `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script |
 | `--job-name=NAME` | Job name for workload manager |
 | `--walltime=TIME` | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
@@ -48,9 +49,9 @@ Used to run tasks.
 ```bash
 ./run_tasks.sh tasks/build
 ./run_tasks.sh --dry-run tasks/experiment/MatMul
-./run_tasks.sh --run=run:1:5 tasks/experiment/MatMul/IS1/baseline
+./run_tasks.sh tasks/experiment/MatMul/IS1/baseline:run:1:5
 ./run_tasks.sh --workload-manager=workload_managers/slurm.sh --walltime=1:00:00 tasks/experiment
-./run_tasks.sh --clean --run=run1 tasks/experiment
+./run_tasks.sh --clean tasks/experiment:run1
 ```
 
 ### Tasks
@@ -117,7 +118,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 ./run_tasks.sh tasks/experiment/MatMul/*/data
 
 # 3. Run all experiment tasks (except data generation) 5 times
-./run_tasks.sh --run=run:1:5 "tasks/experiment/MatMul/*/!(data)"
+./run_tasks.sh "tasks/experiment/MatMul/*/!(data):run:1:5"
 
 # 4. Generate plots from experiment results in tasks/plot/MatMul/assets
 ./run_tasks.sh tasks/plot
@@ -129,7 +130,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 With dependencies declared in `env.sh` (via `TASK_DEPENDS`), the workflow can be submitted as a single command:
 
 ```bash
-./run_tasks.sh tasks/build tasks/experiment/*/*/data --run=run:1:5 "tasks/experiment/*/*/!(data)" --run=assets tasks/plot
+./run_tasks.sh tasks/build tasks/experiment/*/*/data "tasks/experiment/*/*/!(data):run:1:5" tasks/plot
 ```
 
 ## Artifact Packing
