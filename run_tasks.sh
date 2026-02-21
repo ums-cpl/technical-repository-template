@@ -854,6 +854,8 @@ main() {
 
     echo "Running $total_ops run(s) across $total task(s) in $((max_stage + 1)) stage(s)..."
     for stage in $(seq 0 "$max_stage"); do
+      echo ""
+      echo "--- Stage $stage ---"
       local pair
       for pair in "${TASK_RUN_PAIRS[@]}"; do
         local task_dir="${pair%%	*}"
@@ -876,8 +878,9 @@ main() {
         fi
       done
     done
+    echo
     if [[ "$DRY_RUN" == true ]]; then
-      echo "Finished. $total_ops run(s) (dry run)."
+      echo "Finished with $total_ops run(s) (dry run)."
     else
       local summary="Finished with $succeeded successes and $failed failures."
       [[ $skipped -gt 0 ]] && summary="$summary $skipped already succeeded (skipped)."
