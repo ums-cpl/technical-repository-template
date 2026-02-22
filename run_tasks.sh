@@ -172,8 +172,9 @@ expand_run_spec_for_clean() {
     shopt -u nullglob
     # Sort for deterministic ordering
     local -a sorted=()
-    while IFS= read -r r; do
-      [[ -n "$r" ]] && sorted+=("$r")
+    local _run
+    while IFS= read -r _run; do
+      [[ -n "$_run" ]] && sorted+=("$_run")
     done < <(printf '%s\n' "${_out[@]}" | sort)
     _out=("${sorted[@]}")
   else
@@ -488,7 +489,6 @@ compute_stages() {
       set +f
       local dep_task_path="${parsed[0]}"
       local dep_run_spec="${parsed[1]:-}"
-
       local resolved=() r
       while IFS= read -r r; do
         [[ -n "$r" ]] && resolved+=("$r")
