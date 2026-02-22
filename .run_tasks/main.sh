@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Main orchestration.
+
+main() {
+  parse_args "$@"
+
+  # Array execution mode: workload manager invokes us for a single array element
+  if [[ -n "$ARRAY_MANIFEST" && -n "$ARRAY_JOB_ID" && -n "$ARRAY_TASK_ID" ]]; then
+    run_array_task "$ARRAY_MANIFEST" "$ARRAY_JOB_ID" "$ARRAY_TASK_ID"
+    exit $?
+  fi
+
+  # Check if any tasks were specified
+  if [[ ${#TASK_SPECS[@]} -eq 0 ]]; then
+    echo "Error: No tasks specified." >&2
+    usage >&2
+    exit 1
+  fi
+
+  build_task_run_pairs
+
+  if [[ "$CLEAN" == true ]]; then
+    # Clean mode: remove output folders only, with progress output
+    local total=${#TASKS_UNIQUE[@]}
+    local total_ops=${#TASK_RUN_PAIRS[@]}
+    echo "Cleaning $total_ops run(s) across $total task(s)$([[ "$DRY_RUN" == true ]] && echo " (dry run)" || true)..."
+    local op_counter=0
+    local pair
+    for pair in "${TASK_RUN_PAIRS[@]}"; do
+      op_counter=$((op_counter + 1))
+      local task_dir="${pair%%	*}"
+      local run_name="${pair#*	}"
+      local rel_path="${task_dir#$TASKS_DIR/}"
+      local run_folder="$task_dir/$run_name"
+      printf "[%d/%d] %s/%s ... " "$op_counter" "$total_ops" "$rel_path" "$run_name"
+      if [[ -d "$run_folder" ]]; then
+        if [[ "$DRY_RUN" == true ]]; then
+          echo -e "\033[0;90mDRY RUN\033[0m"
+        else
+          rm -rf "$run_folder"
+          echo -e "\033[0;32mREMOVED\033[0m"
+        fi
+      else
+        if [[ "$DRY_RUN" == true ]]; then
+          echo -e "\033[0;90mDRY RUN (not found)\033[0m"
+        else
+          echo -e "\033[0;32mREMOVED (not found)\033[0m"
+        fi
+      fi
+    done
+    echo "Cleaned $total_ops run(s) for $total task(s)$([[ "$DRY_RUN" == true ]] && echo " (dry run)" || true)."
+    exit 0
+  else
+    local total=${#TASKS_UNIQUE[@]}
+
+    # Workload manager path: create manifest, invoke workload manager (single arg)
+    if [[ -n "$WORKLOAD_MANAGER_SCRIPT" ]]; then
+      local wm_script manifest_path
+      wm_script="$WORKLOAD_MANAGER_SCRIPT"
+      [[ "$wm_script" != /* ]] && wm_script="$REPOSITORY_ROOT/$wm_script"
+      if [[ ! -f "$wm_script" ]]; then
+        echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
+        exit 1
+      fi
+      manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
+      if [[ "$DRY_RUN" == true ]]; then
+        cat "$manifest_path"
+        exit 0
+      fi
+      if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
+        echo "All tasks already succeeded, nothing to submit."
+        exit 0
+      fi
+      log_dir="$(dirname "$manifest_path")"
+      export REPOSITORY_ROOT
+      [[ -n "$JOB_NAME" ]] && export JOB_NAME
+      [[ -n "$WALLTIME" ]] && export WALLTIME
+      bash "$wm_script" "$manifest_path" "$log_dir"
+      exit $?
+    fi
+
+    # Direct execution: create manifest (for audit), run stages sequentially, then (task, run) pairs within each stage
+    declare -A task_stage
+    declare -A task_dep_checks
+    local max_stage=0
+    compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks
+
+    local manifest_path
+    manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
+    if [[ "$DRY_RUN" == true ]]; then
+      cat "$manifest_path"
+      exit 0
+    fi
+
+    local total_ops=${#TASK_RUN_PAIRS[@]}
+    local current=0
+    local succeeded=0
+    local failed=0
+    local skipped=0
+
+    echo "Running $total_ops run(s) across $total task(s) in $((max_stage + 1)) stage(s)..."
+    for stage in $(seq 0 "$max_stage"); do
+      echo ""
+      echo "--- Stage $stage ---"
+      check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks TASK_RUN_PAIRS
+      local pair
+      for pair in "${TASK_RUN_PAIRS[@]}"; do
+        local task_dir="${pair%%	*}"
+        local run_name="${pair#*	}"
+        [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+        current=$((current + 1))
+        local rel_path="${task_dir#$TASKS_DIR/}"
+        printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
+        if [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
+          echo -e "\033[0;33mSKIPPED\033[0m"
+          skipped=$((skipped + 1))
+        elif run_task "$task_dir" "$run_name"; then
+          echo -e "\033[0;32mSUCCESS\033[0m"
+          succeeded=$((succeeded + 1))
+        else
+          echo -e "\033[0;31mFAILED\033[0m"
+          failed=$((failed + 1))
+        fi
+      done
+    done
+    echo
+    local summary="Finished with $succeeded successes and $failed failures."
+    [[ $skipped -gt 0 ]] && summary="$summary $skipped already succeeded (skipped)."
+    echo "$summary"
+    exit $((failed > 0 ? 1 : 0))
+  fi
+}
