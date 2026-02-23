@@ -87,6 +87,7 @@ A **task** is a static definition of work. A **task run** is a concrete executio
 |----------|-------------|
 | `CONTAINER` | Container image (`.sif`) to use for task runs |
 | `CONTAINER_DEF` | Definition file (`.def`) to validate the container against |
+| `CONTAINER_GPU` | Set to `ON` if the container uses a GPU |
 | `RUN_SPEC` | Default task runs to execute (overridden by the CLI `:RUN_SPEC` suffix) |
 | `WORKLOAD_MANAGER` | Workload manager script to use for this task |
 
