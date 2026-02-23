@@ -156,7 +156,7 @@ where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task 
 
 ## Example
 
-The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/MatMul/` generates plots from the results. It illustrates hierarchical configuration via `task_meta.sh`, container use for build and plot, and how assets receive task paths as arguments.
+The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/` generates plots from the results. It illustrates hierarchical configuration via `task_meta.sh`, container use for build and plot, and how assets receive task paths as arguments.
 
 ### Running the Example Tasks
 
@@ -170,7 +170,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 # 3. Run all experiment tasks (except data generation) 5 times
 ./run_tasks.sh "tasks/experiment/MatMul/*/!(data):run:1:5"
 
-# 4. Generate plots from experiment results in tasks/plot/MatMul/assets
+# 4. Generate plots from experiment results
 ./run_tasks.sh tasks/plot
 
 # 5. Clean task data
