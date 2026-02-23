@@ -1,239 +1,194 @@
 #!/usr/bin/env python3
 """
-Discover input sizes (IS1, IS2, ...), run types (baseline, optimized, etc.) from a
-routine tasks folder and plot runtimes as grouped boxplots.
-Expects: tasks_folder/IS1/run_type/runN/runtimes
-Stores the plot(s) as PDF (runtimes1.pdf, runtimes2.pdf, etc.).
+Plot speedup of competitors over baseline from experiment results.
+
+Expected input structure:
+  <experiment_dir>/<routine>/<input_size>/<competitor>/<device>-run<N>/runtimes
+
+Each runtimes file contains one runtime value (nanoseconds) per line.
+The "data" competitor folder is ignored.
+
+Output: a single PDF with one subplot per (device, routine) combination,
+each showing speedup box plots of non-baseline competitors relative to baseline.
 """
 import argparse
 import re
+from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Tuple
-
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 
-# Units for runtime display: (scale factor from ns, label)
-RUNTIME_UNITS = [
-    (1e9, "s"),
-    (1e6, "ms"),
-    (1e3, "us"),
-    (1.0, "ns"),
-]
+
+def natural_sort_key(s: str):
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
 
 
-def discover_experiment_data(
-    tasks_folder: Path,
-) -> Tuple[List[str], List[str], Dict[Tuple[str, str], List[float]]]:
+def discover_data(
+    experiment_dir: Path,
+) -> dict[tuple[str, str, str, str], list[float]]:
     """
-    Discover input sizes, run types, and collect runtimes from a routine tasks folder.
-    tasks_folder = e.g. tasks/experiment/MatMul with structure:
-      tasks_folder/IS1/run_type/runN/runtimes
-    Returns (input_sizes, run_types, data) where data[(is_name, run_type)] = list of runtimes in ns.
+    Walk experiment_dir/<routine>/<input_size>/<competitor>/<device>-run<N>/runtimes
+    and return {(routine, input_size, competitor, device): [runtimes]}.
     """
-    if not tasks_folder.is_dir():
-        raise ValueError(f"Tasks folder does not exist or is not a directory: {tasks_folder}")
+    data: dict[tuple[str, str, str, str], list[float]] = defaultdict(list)
 
-    # Input sizes: IS1, IS2, ... (sorted)
-    input_sizes = sorted(
-        d.name
-        for d in tasks_folder.iterdir()
-        if d.is_dir() and re.match(r"^IS\d+$", d.name)
-    )
-
-    # Run types: baseline, optimized, reference, etc. (from first input size)
-    # Exclude "data" which does not produce runtimes
-    run_types = []
-    if input_sizes:
-        first_is_path = tasks_folder / input_sizes[0]
-        run_types = sorted(
-            d.name
-            for d in first_is_path.iterdir()
-            if d.is_dir() and not d.name.startswith(".") and d.name != "data"
-        )
-
-    # Collect runtimes: data[(is_name, run_type)] = list of all runtimes (ns)
-    data: Dict[Tuple[str, str], List[float]] = {}
-    for is_name in input_sizes:
-        is_path = tasks_folder / is_name
-        for run_type in run_types:
-            run_type_path = is_path / run_type
-            if not run_type_path.is_dir():
+    for routine_dir in sorted(experiment_dir.iterdir()):
+        if not routine_dir.is_dir():
+            continue
+        for is_dir in sorted(routine_dir.iterdir()):
+            if not is_dir.is_dir():
                 continue
-            runtimes_ns: list[float] = []
-            for run_dir in sorted(run_type_path.iterdir()):
-                if not run_dir.is_dir() or not re.match(r"^run\d+$", run_dir.name):
+            for comp_dir in sorted(is_dir.iterdir()):
+                if not comp_dir.is_dir() or comp_dir.name == "data":
                     continue
-                runtimes_file = run_dir / "runtimes"
-                if runtimes_file.is_file():
+                for run_dir in sorted(comp_dir.iterdir()):
+                    if not run_dir.is_dir():
+                        continue
+                    m = re.match(r"^(.+)-run(\d+)$", run_dir.name)
+                    if not m:
+                        continue
+                    device = m.group(1)
+                    runtimes_file = run_dir / "runtimes"
+                    if not runtimes_file.is_file():
+                        continue
+                    key = (routine_dir.name, is_dir.name, comp_dir.name, device)
                     with open(runtimes_file) as f:
                         for line in f:
                             line = line.strip()
                             if line:
                                 try:
-                                    runtimes_ns.append(float(line))
+                                    data[key].append(float(line))
                                 except ValueError:
                                     pass
-            if runtimes_ns:
-                data[(is_name, run_type)] = runtimes_ns
 
-    return input_sizes, run_types, data
+    return dict(data)
 
 
-def group_input_sizes_by_magnitude(
-    input_sizes: List[str],
-    data: Dict[Tuple[str, str], List[float]],
-) -> List[List[str]]:
+def compute_speedups(
+    data: dict[tuple[str, str, str, str], list[float]],
+    routine: str,
+    input_size: str,
+    device: str,
+    competitors: list[str],
+) -> dict[str, list[float]]:
     """
-    Group input sizes by floor(log10(median_runtime)).
-    Returns list of groups, each group a list of input size names, sorted by ascending order of magnitude.
+    For each non-baseline competitor, compute speedup values as
+    median(baseline_runtimes) / competitor_runtime.
     """
-    om_to_sizes: Dict[int, List[str]] = {}
-    for is_name in input_sizes:
-        all_runtimes: List[float] = []
-        for key, vals in data.items():
-            if key[0] == is_name:
-                all_runtimes.extend(vals)
-        if not all_runtimes:
+    baseline_rts = data.get((routine, input_size, "baseline", device), [])
+    if not baseline_rts:
+        return {}
+
+    baseline_median = float(np.median(baseline_rts))
+    result: dict[str, list[float]] = {}
+    for comp in competitors:
+        if comp == "baseline":
             continue
-        median_val = float(np.median(all_runtimes))
-        median_val = max(1.0, median_val)
-        om = int(np.floor(np.log10(median_val)))
-        if om not in om_to_sizes:
-            om_to_sizes[om] = []
-        om_to_sizes[om].append(is_name)
-    for sizes in om_to_sizes.values():
-        sizes.sort(key=lambda s: input_sizes.index(s))
-    return [om_to_sizes[om] for om in sorted(om_to_sizes)]
-
-
-def plot_grouped_boxplots(
-    input_sizes: List[str],
-    run_types: List[str],
-    data: Dict[Tuple[str, str], List[float]],
-    output_path: Path,
-) -> None:
-    """Create grouped boxplots and save as PDF."""
-    n_input_sizes = len(input_sizes)
-    n_run_types = len(run_types)
-    if n_input_sizes == 0 or n_run_types == 0:
-        raise ValueError("No input sizes or run types found")
-
-    # Build plot data: for each (input_size, run_type) a box
-    box_data: list[list[float]] = []
-    labels: list[str] = []
-    positions: list[float] = []
-    group_gap = 0.5
-    box_width = 0.6
-
-    pos = 0
-    for is_name in input_sizes:
-        for run_type in run_types:
-            key = (is_name, run_type)
-            if key in data and data[key]:
-                positions.append(pos)
-                box_data.append(data[key])
-                labels.append(run_type)
-                pos += 1
-        pos += group_gap
-
-    if not box_data:
-        raise ValueError("No runtime data found")
-
-    # Choose unit so typical values have few digits (aim for 1–1000 range)
-    all_vals = [v for vals in box_data for v in vals]
-    median_ns = float(np.median(all_vals))
-    scale, unit = 1.0, "ns"
-    for s, u in RUNTIME_UNITS:
-        if median_ns >= s:
-            scale, unit = s, u
-            break
-    scaled_data = [[v / scale for v in vals] for vals in box_data]
-
-    fig, ax = plt.subplots(figsize=(8, 5))
-    bp = ax.boxplot(
-        scaled_data,
-        positions=positions,
-        widths=box_width,
-        patch_artist=True,
-        showfliers=True,
-    )
-
-    # Color by run type
-    cmap = plt.get_cmap("Set2")
-    colors = cmap(np.linspace(0, 1, n_run_types))
-    run_type_to_color = {rt: colors[i] for i, rt in enumerate(run_types)}
-    for patch, label in zip(bp["boxes"], labels):
-        patch.set_facecolor(run_type_to_color.get(label, "lightgray"))
-
-    # X-axis: tick at center of each input size group
-    tick_positions = []
-    tick_labels = []
-    pos = 0
-    for is_name in input_sizes:
-        group_count = sum(
-            1 for rt in run_types if (is_name, rt) in data and data[(is_name, rt)]
-        )
-        if group_count > 0:
-            center = pos + (group_count - 1) / 2
-            tick_positions.append(center)
-            tick_labels.append(is_name)
-            pos += group_count + group_gap
-        else:
-            pos += group_gap
-
-
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels(tick_labels)
-    ax.set_xlabel("Input size")
-    ax.set_ylabel(f"Runtime ({unit})")
-    sf = ticker.ScalarFormatter(useOffset=False)
-    sf.set_scientific(False)
-    ax.yaxis.set_major_formatter(sf)
-    ax.set_title("Runtimes by input size and run type")
-
-    from matplotlib.patches import Patch
-
-    legend_elements = [
-        Patch(facecolor=run_type_to_color[rt], label=rt) for rt in run_types
-    ]
-    ax.legend(handles=legend_elements, loc="upper right")
-
-    plt.tight_layout()
-    fig.savefig(output_path, format="pdf", bbox_inches="tight")
-    plt.close()
-    print(f"Saved plot to {output_path}")
+        rts = data.get((routine, input_size, comp, device), [])
+        if rts:
+            result[comp] = [baseline_median / rt for rt in rts]
+    return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Plot runtimes from a routine tasks folder (e.g. tasks/experiment/MatMul)"
+        description="Plot competitor speedup over baseline from experiment results."
     )
+    parser.add_argument("experiment_dir", type=Path, help="Root experiment folder")
     parser.add_argument(
-        "tasks_folder",
+        "-o",
+        "--output",
         type=Path,
-        help="Path to tasks folder with input sizes (IS1, IS2, ...) and run types as subfolders",
+        default=Path("runtimes.pdf"),
+        help="Output PDF path (default: runtimes.pdf)",
     )
     args = parser.parse_args()
 
-    tasks_folder = args.tasks_folder.resolve()
+    data = discover_data(args.experiment_dir.resolve())
+    if not data:
+        raise SystemExit("No runtime data found.")
 
-    input_sizes, run_types, data = discover_experiment_data(tasks_folder)
-    print(f"Discovered input sizes: {input_sizes}")
-    print(f"Discovered run types: {run_types}")
-    for key, vals in sorted(data.items()):
-        print(f"  {key}: {len(vals)} runtimes")
+    routines = sorted({k[0] for k in data}, key=natural_sort_key)
+    devices = sorted({k[3] for k in data}, key=natural_sort_key)
+    competitors = sorted({k[2] for k in data}, key=natural_sort_key)
+    nb_competitors = [c for c in competitors if c != "baseline"]
+    if not nb_competitors:
+        raise SystemExit("No non-baseline competitors found.")
 
-    groups = group_input_sizes_by_magnitude(input_sizes, data)
-    for i, group in enumerate(groups, start=1):
-        group_data = {
-            k: v for k, v in data.items()
-            if k[0] in group
-        }
-        output_path = Path.cwd() / f"runtimes{i}.pdf"
-        plot_grouped_boxplots(group, run_types, group_data, output_path)
+    panels = [(d, r) for d in devices for r in routines]
+    n = len(panels)
+    ncols = min(n, 3)
+    nrows = -(-n // ncols)
+
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(6 * ncols, 4 * nrows), squeeze=False
+    )
+
+    cmap = plt.get_cmap("Set2")
+    colors = {
+        comp: cmap(i / max(len(nb_competitors) - 1, 1))
+        for i, comp in enumerate(nb_competitors)
+    }
+
+    for idx, (device, routine) in enumerate(panels):
+        ax = axes[idx // ncols][idx % ncols]
+        input_sizes = sorted(
+            {k[1] for k in data if k[0] == routine and k[3] == device},
+            key=natural_sort_key,
+        )
+
+        group_width = len(nb_competitors)
+        box_width = 0.6
+        all_box_data: list[list[float]] = []
+        all_positions: list[float] = []
+        all_colors: list = []
+        tick_positions: list[float] = []
+        tick_labels: list[str] = []
+
+        for g, is_name in enumerate(input_sizes):
+            speedups = compute_speedups(data, routine, is_name, device, competitors)
+            group_start = g * (group_width + 1)
+            for j, comp in enumerate(nb_competitors):
+                if comp in speedups:
+                    all_positions.append(group_start + j)
+                    all_box_data.append(speedups[comp])
+                    all_colors.append(colors[comp])
+            tick_positions.append(group_start + (group_width - 1) / 2)
+            tick_labels.append(is_name)
+
+        if not all_box_data:
+            ax.set_visible(False)
+            continue
+
+        bp = ax.boxplot(
+            all_box_data,
+            positions=all_positions,
+            widths=box_width,
+            patch_artist=True,
+            whis=[5, 95],
+        )
+        for patch, c in zip(bp["boxes"], all_colors):
+            patch.set_facecolor(c)
+
+        ax.axhline(y=1.0, color="gray", linestyle="--", linewidth=0.8, zorder=0)
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels)
+        ax.set_ylabel("Speedup over baseline")
+        ax.set_title(f"{routine} ({device})")
+
+    for idx in range(n, nrows * ncols):
+        axes[idx // ncols][idx % ncols].set_visible(False)
+
+    from matplotlib.patches import Patch
+
+    legend_handles = [Patch(facecolor=colors[c], label=c) for c in nb_competitors]
+    fig.legend(handles=legend_handles, loc="upper right")
+
+    plt.tight_layout()
+    fig.savefig(args.output, format="pdf", bbox_inches="tight")
+    plt.close()
+    print(f"Saved {args.output}")
 
 
 if __name__ == "__main__":

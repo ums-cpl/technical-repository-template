@@ -1,0 +1,1 @@
+export RUN_SPEC=$BUILD_FOLDER
