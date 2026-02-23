@@ -102,9 +102,20 @@ compute_stages() {
           _task_dep_checks["$task_dir"]+="ALL	$r"$'\n'
 
         elif [[ "$dep_run_spec" == *"*"* || "$dep_run_spec" == *"?"* ]]; then
-          # Wildcard: expand against existing folders on disk
+          # Wildcard: expand against existing folders on disk and runs in the current invocation
           local -a matched_runs=()
           expand_run_spec_for_clean "$r" "$dep_run_spec" matched_runs
+          # Also match against runs in the current invocation for this dep task
+          declare -A _matched_set=()
+          for _mr in "${matched_runs[@]}"; do _matched_set["$_mr"]=1; done
+          for _inv_pair in "${_task_run_pairs_ref[@]}"; do
+            local _inv_td="${_inv_pair%%	*}" _inv_rn="${_inv_pair#*	}"
+            if [[ "$_inv_td" == "$r" ]] && [[ "$_inv_rn" == $dep_run_spec ]] \
+               && [[ -z "${_matched_set["$_inv_rn"]+x}" ]]; then
+              matched_runs+=("$_inv_rn")
+              _matched_set["$_inv_rn"]=1
+            fi
+          done
           if [[ ${#matched_runs[@]} -eq 0 ]]; then
             local rel_task="${task_dir#$TASKS/}"
             local rel_dep="${r#$TASKS/}"
