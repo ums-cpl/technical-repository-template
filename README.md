@@ -10,7 +10,7 @@ A [getting started guide](palmaII-getting-started.md) is available for users not
 
 ## Design
 
-The template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code in `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
+The template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code from `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
 
 ### run_tasks.sh
 
@@ -22,15 +22,15 @@ Used to run tasks.
 ./run_tasks.sh [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
 ```
 
-**KEY=VALUE** pairs are environment overrides applied after sourcing env files and can be read inside the task script.
+**KEY=VALUE** pairs are environment overrides applied after sourcing `task_meta.sh` and `run_env.sh` files and can be read inside the run script.
 
 **TASK** can be:
 
-- A task directory (path to a dir containing `task.sh`)
-- A parent directory (recursively finds all descendant dirs with `task.sh`)
+- A task directory (path to a dir containing `run.sh`)
+- A parent directory (recursively finds all descendant dirs with `run.sh`)
 - A wildcard (e.g. `tasks/.../*`; use `"!(pattern)"` to exclude)
 
-Optional suffix `:RUN_SPEC` sets run(s). Examples: `:local`, `:run:1:10`, `:run*` (clean only, wildcard). Without suffix: default run `assets` for execute; cleans all runs with `--clean`.
+Optional suffix `:RUN_SPEC` overrides the task's `RUN_SPEC` (set in `task_meta.sh`). Examples: `:local`, `:run:1:10`, `:run*` (clean only, wildcard). Without suffix: uses the task's `RUN_SPEC`; cleans all runs with `--clean`.
 
 **Options:**
 
@@ -56,18 +56,62 @@ Optional suffix `:RUN_SPEC` sets run(s). Examples: `:local`, `:run:1:10`, `:run*
 
 ### Tasks
 
-Tasks are defined as a tree under `tasks/`. Each task is a directory containing `task.sh`.
+Tasks are defined as a tree under `tasks/`. A task is a directory containing at least `run.sh`; all other files (`task_meta.sh`, `run_env.sh`, `run_deps.sh`) are optional. Directories under `tasks/` form a hierarchy; any directory with `run.sh` is a task.
 
-- **Tree structure:** Directories under `tasks/` form a hierarchy; any dir with `task.sh` is a task.
-- **env files:** `env.sh`, `env_host.sh`, and `env_container.sh` may appear along the path from `tasks/` to a task. They are sourced in root-to-leaf order before `task.sh` runs. `env_host.sh` is used on the host; `env_container.sh` inside the container. Optionally set `CONTAINER` to a `.sif` file in `containers/` to run the task inside that container.
-- **Paths:** Use `$REPOSITORY_ROOT` and `$RUN_FOLDER` for paths. Reference assets and containers relative to `$REPOSITORY_ROOT`. Task output goes to `$RUN_FOLDER`.
-- **Dependencies:** Optionally create `depends.sh` next to `env.sh` and set `TASK_DEPENDS` (array of dependency specs). `depends.sh` is sourced after `env.sh`, `env_host.sh`, and command-line overrides (KEY=VALUE), so variables like `$BUILD_FOLDER` and overrides are available in dependency specs. Each entry is a task path with an optional `:RUN_SPEC` suffix:
-  - `tasks/task1` -- depends on all runs of task1 (disk and invocation): every run must have `.success`, and at least one run must exist
-  - `tasks/task1:local` -- depends on the `local` run of task1
-  - `tasks/task1:run:1:10` -- depends on runs `run1` through `run10` of task1
-  - `"tasks/task1:run*"` -- depends on all runs matching `run*` on disk (quote to prevent shell glob expansion)
+A **task** is a static definition of work. A **task run** is a concrete execution of that work. One task can have multiple task runs (e.g., repeated experiments).
 
-  A dependency is resolved if it is in the current invocation or already has a `.success` file on disk. If neither holds, the runner fails with an error listing the unresolved dependencies. Between stages, the runner verifies that all dependency runs have `.success` files before proceeding.
+| | Task | Task Run |
+|---|---|---|
+| Purpose | Static definition of work | Concrete execution of that work |
+| Identified by | Directory containing `run.sh` | A named run within a task (e.g., `assets`, `run1`) |
+| Configuration | `task_meta.sh` (hierarchical, root-to-leaf) | `run_env.sh` (hierarchical, inherits task config, adds `$RUN_ID`) |
+| Execution | -- | `run.sh` (leaf-only, invokes code from `assets/`) |
+| Dependencies | -- | `run_deps.sh` (hierarchical, writes `DEPENDENCIES`) |
+
+#### Task: `task_meta.sh`
+
+`task_meta.sh` files may appear along the path from `tasks/` to a task directory and are sourced in root-to-leaf order. They define the static configuration for a task.
+
+**Available variables** (provided by the framework):
+
+| Variable | Description |
+|----------|-------------|
+| `$CONTAINERS` | Path to the `containers/` directory |
+| `$ASSETS` | Path to the `assets/` directory |
+| `$TASKS` | Path to the `tasks/` directory |
+| `$WORKLOAD_MANAGERS` | Path to the `workload_managers/` directory |
+
+**Writable variables** (read by the framework):
+
+| Variable | Description |
+|----------|-------------|
+| `CONTAINER` | Container image (`.sif`) to use for task runs |
+| `CONTAINER_DEF` | Definition file (`.def`) to validate the container against |
+| `RUN_SPEC` | Default task runs to execute (overridden by the CLI `:RUN_SPEC` suffix) |
+| `WORKLOAD_MANAGER` | Workload manager script to use for this task |
+
+#### Task Run: `run_env.sh`, `run_deps.sh`, `run.sh`
+
+**`run_env.sh`** -- Hierarchical (sourced root-to-leaf, like `task_meta.sh`). Defines variables and helper functions for the run. Has all data from the `task_meta.sh` chain available. Available variables:
+
+| Variable | Description |
+|----------|-------------|
+| `$CONTAINERS` | Path to the `containers/` directory |
+| `$ASSETS` | Path to the `assets/` directory |
+| `$TASKS` | Path to the `tasks/` directory |
+| `$WORKLOAD_MANAGERS` | Path to the `workload_managers/` directory |
+| `$RUN_ID` | Identifier of the current task run |
+
+**`run_deps.sh`** -- Hierarchical (sourced root-to-leaf). Defines dependencies by writing `DEPENDENCIES` (array of dependency specs). Has the same data and variables available as `run_env.sh`. Each entry is a task path with an optional `:RUN_SPEC` suffix:
+
+- `tasks/task1` -- depends on all runs of task1: every run must have `.success`, and at least one run must exist
+- `tasks/task1:local` -- depends on the `local` run of task1
+- `tasks/task1:run:1:10` -- depends on runs `run1` through `run10` of task1
+- `"tasks/task1:run*"` -- depends on all runs matching `run*` (quote to prevent shell glob expansion)
+
+A dependency is resolved if it is in the current invocation or already has a `.success` file on disk. If neither holds, the runner fails with an error listing the unresolved dependencies. Between stages, the runner verifies that all dependency runs have `.success` files before proceeding.
+
+**`run.sh`** -- Leaf-only (one per task, required). The entry point for execution; invokes code from `assets/`. Has all data from the `task_meta.sh` and `run_env.sh` chains available.
 
 ### Assets
 
@@ -106,13 +150,13 @@ where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task 
 ## Best Practices
 
 - **Assets:** Write them as if tasks don't exist—executable by themselves, not reading the `tasks/` folder directly. Accept paths to files/folders (that may be in `tasks/`) as arguments instead.
-- **Tasks:** Keep `task.sh` short and simple; do task-related processing in asset files. Use `env.sh` to define helper functions shared by similar tasks.
+- **Tasks:** Keep `run.sh` short and simple; do task-related processing in asset files. Use `task_meta.sh` for shared metadata across a subtree and `run_env.sh` for setting up the environment in which the task is run.
 - **Containers:** Avoid unnecessary bloat to keep image sizes small.
 - **Documentation:** Describe the available tasks and how they are expected to run. For each task (or task group), document its purpose, prerequisites, inputs, outputs, and exact call to `run_tasks.sh` (e.g., via a README).
 
 ## Example
 
-The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/MatMul/` generates plots from the results. It illustrates env inheritance, container use for build and plot, and how assets receive task paths as arguments.
+The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/MatMul/` generates plots from the results. It illustrates hierarchical configuration via `task_meta.sh`, container use for build and plot, and how assets receive task paths as arguments.
 
 ### Running the Example Tasks
 
@@ -133,7 +177,7 @@ The example implements a MatMul benchmark: `tasks/build/` compiles data and expe
 ./run_tasks.sh --clean tasks
 ```
 
-With dependencies declared in `depends.sh` (via `TASK_DEPENDS`), the workflow can be submitted as a single command:
+With dependencies declared in `run_deps.sh` (via `DEPENDENCIES`), the workflow can be submitted as a single command:
 
 ```bash
 ./run_tasks.sh tasks/build tasks/experiment/*/*/data "tasks/experiment/*/*/!(data):run:1:5" tasks/plot
