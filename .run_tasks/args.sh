@@ -6,12 +6,12 @@ usage() {
 Usage: $0 [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
 
 Execute tasks. TASK can be:
-  - Task directory: path to dir containing task.sh (e.g. tasks/.../task1)
-  - Parent directory: recursively finds all descendant dirs with task.sh
+  - Task directory: path to dir containing run.sh (e.g. tasks/.../task1)
+  - Parent directory: recursively finds all descendant dirs with run.sh
   - Wildcard: expands to matching dirs (e.g. tasks/.../*). Use !(pattern) to exclude (e.g. tasks/.../*/!(data))
 
   Optional suffix :RUN_SPEC sets run(s). Examples: :local, :run:1:10, :run* (clean only, wildcard).
-  Without suffix: default run "assets" for execute; cleans all runs with --clean.
+  Without suffix: uses task's RUN_SPEC (default "assets") for execute; cleans all runs with --clean.
   Quote the task spec if RUN_SPEC contains * or ? (e.g. "tasks/task1:run*").
 
 Options:
@@ -24,7 +24,7 @@ Options:
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
   -h, --help             Show this help
 
-Environment overrides (KEY=VALUE) are applied after sourcing env files.
+Environment overrides (KEY=VALUE) are applied after sourcing task_meta.sh and run_env.sh files.
 EOF
 }
 

@@ -5,7 +5,10 @@
 set -euo pipefail
 
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TASKS_DIR="$REPOSITORY_ROOT/tasks"
+TASKS="$REPOSITORY_ROOT/tasks"
+CONTAINERS="$REPOSITORY_ROOT/containers"
+ASSETS="$REPOSITORY_ROOT/assets"
+WORKLOAD_MANAGERS="$REPOSITORY_ROOT/workload_managers"
 RUN_TASKS_LIB="$REPOSITORY_ROOT/.run_tasks"
 
 source "$RUN_TASKS_LIB/config.sh"

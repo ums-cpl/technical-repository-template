@@ -30,7 +30,7 @@ main() {
       op_counter=$((op_counter + 1))
       local task_dir="${pair%%	*}"
       local run_name="${pair#*	}"
-      local rel_path="${task_dir#$TASKS_DIR/}"
+      local rel_path="${task_dir#$TASKS/}"
       local run_folder="$task_dir/$run_name"
       printf "[%d/%d] %s/%s ... " "$op_counter" "$total_ops" "$rel_path" "$run_name"
       if [[ -d "$run_folder" ]]; then
@@ -109,7 +109,7 @@ main() {
         local run_name="${pair#*	}"
         [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
         current=$((current + 1))
-        local rel_path="${task_dir#$TASKS_DIR/}"
+        local rel_path="${task_dir#$TASKS/}"
         printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
         if [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
           echo -e "\033[0;33mSKIPPED\033[0m"

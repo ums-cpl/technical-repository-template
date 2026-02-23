@@ -4,7 +4,7 @@
 # Compute stages from task dependencies. Populates _task_stage[path]=stage_id.
 # Sets _max_stage to max stage id (stages are 0.._max_stage).
 # Populates _task_dep_checks with per-task dependency checks for inter-stage verification.
-# Each TASK_DEPENDS entry may include a run suffix (e.g. :local, :run:1:10, :run*).
+# Each DEPENDENCIES entry may include a run suffix (e.g. :local, :run:1:10, :run*).
 # A dependency is resolved if it is in the current invocation or has .success on disk.
 # For task-only deps (no run spec): all runs on disk must have .success, and at least one run must exist (disk or invocation).
 compute_stages() {
@@ -29,15 +29,24 @@ compute_stages() {
 
   # Build dependency map: task -> list of dep tasks (for DAG, deduplicated)
   # Validate that each dependency is resolved (in invocation or .success on disk)
+  # Dependencies are per-run: iterate over task-run pairs, aggregate at the task level.
   declare -A deps
   declare -A dep_edges_added
   declare -A missing_deps
   local missing_count=0
   local task_dir dep_entry
+
+  # Initialize deps for all tasks
   for task_dir in "${_tasks[@]}"; do
     deps["$task_dir"]=""
+  done
+
+  # Collect deps per task-run pair
+  for pair in "${_task_run_pairs_ref[@]}"; do
+    task_dir="${pair%%	*}"
+    local run_name="${pair#*	}"
     local dep_entries=()
-    get_task_depends "$task_dir" dep_entries
+    get_task_dependencies "$task_dir" "$run_name" dep_entries
     for dep_entry in "${dep_entries[@]}"; do
       local parsed
       set -f
@@ -85,8 +94,8 @@ compute_stages() {
           [[ "$all_disk_ok" == true ]] && [[ "$has_at_least_one" == true ]] && resolved_ok=true
 
           if [[ "$resolved_ok" != true ]]; then
-            local rel_task="${task_dir#$TASKS_DIR/}"
-            local rel_dep="${r#$TASKS_DIR/}"
+            local rel_task="${task_dir#$TASKS/}"
+            local rel_dep="${r#$TASKS/}"
             missing_deps["tasks/$rel_dep"]="${missing_deps["tasks/$rel_dep"]:+${missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
             missing_count=$((missing_count + 1))
           fi
@@ -97,16 +106,16 @@ compute_stages() {
           local -a matched_runs=()
           expand_run_spec_for_clean "$r" "$dep_run_spec" matched_runs
           if [[ ${#matched_runs[@]} -eq 0 ]]; then
-            local rel_task="${task_dir#$TASKS_DIR/}"
-            local rel_dep="${r#$TASKS_DIR/}"
+            local rel_task="${task_dir#$TASKS/}"
+            local rel_dep="${r#$TASKS/}"
             local dep_label="tasks/$rel_dep:$dep_run_spec (no matching run folders on disk)"
             missing_deps["$dep_label"]="${missing_deps["$dep_label"]:+${missing_deps["$dep_label"]}, }tasks/$rel_task"
             missing_count=$((missing_count + 1))
           else
             for rn in "${matched_runs[@]}"; do
               if [[ -z "${invocation_pair_set["$r	$rn"]+x}" ]] && [[ ! -f "$r/$rn/.success" ]]; then
-                local rel_task="${task_dir#$TASKS_DIR/}"
-                local rel_dep="${r#$TASKS_DIR/}"
+                local rel_task="${task_dir#$TASKS/}"
+                local rel_dep="${r#$TASKS/}"
                 missing_deps["tasks/$rel_dep:$rn"]="${missing_deps["tasks/$rel_dep:$rn"]:+${missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
                 missing_count=$((missing_count + 1))
               fi
@@ -120,8 +129,8 @@ compute_stages() {
           expand_run_spec "$dep_run_spec" dep_runs
           for rn in "${dep_runs[@]}"; do
             if [[ -z "${invocation_pair_set["$r	$rn"]+x}" ]] && [[ ! -f "$r/$rn/.success" ]]; then
-              local rel_task="${task_dir#$TASKS_DIR/}"
-              local rel_dep="${r#$TASKS_DIR/}"
+              local rel_task="${task_dir#$TASKS/}"
+              local rel_dep="${r#$TASKS/}"
               missing_deps["tasks/$rel_dep:$rn"]="${missing_deps["tasks/$rel_dep:$rn"]:+${missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
               missing_count=$((missing_count + 1))
             fi
@@ -241,14 +250,14 @@ check_stage_deps() {
         done
 
         if [[ ${#union_runs[@]} -eq 0 ]]; then
-          local rel_dep="${dep_dir#$TASKS_DIR/}"
-          local rel_task="${task_dir#$TASKS_DIR/}"
+          local rel_dep="${dep_dir#$TASKS/}"
+          local rel_task="${task_dir#$TASKS/}"
           unsatisfied+=("tasks/$rel_dep (at least one run required) required by tasks/$rel_task")
         else
           for rn in "${!union_runs[@]}"; do
             if [[ ! -f "$dep_dir/$rn/.success" ]]; then
-              local rel_dep="${dep_dir#$TASKS_DIR/}"
-              local rel_task="${task_dir#$TASKS_DIR/}"
+              local rel_dep="${dep_dir#$TASKS/}"
+              local rel_task="${task_dir#$TASKS/}"
               unsatisfied+=("tasks/$rel_dep/$rn required by tasks/$rel_task")
             fi
           done
@@ -257,8 +266,8 @@ check_stage_deps() {
         dep_dir="${rest%%	*}"
         dep_run="${rest#*	}"
         if [[ ! -f "$dep_dir/$dep_run/.success" ]]; then
-          local rel_dep="${dep_dir#$TASKS_DIR/}"
-          local rel_task="${task_dir#$TASKS_DIR/}"
+          local rel_dep="${dep_dir#$TASKS/}"
+          local rel_task="${task_dir#$TASKS/}"
           unsatisfied+=("tasks/$rel_dep/$dep_run required by tasks/$rel_task")
         fi
       fi

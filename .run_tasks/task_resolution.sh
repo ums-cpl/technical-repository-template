@@ -14,14 +14,14 @@ resolve_arg() {
   local tasks_root_abs
   tasks_root_abs="$(cd "$repo_root/tasks" && pwd)"
 
-  # Handle wildcards: expand glob and filter to dirs with task.sh
-  # (* and ? = standard glob; !( = extglob exclusion)
-  if [[ "$arg" == *"*"* || "$arg" == *"?"* || "$arg" == *"!("* ]]; then
+  # Handle wildcards: expand glob and filter to dirs with run.sh
+    # (* and ? = standard glob; !( = extglob exclusion)
+    if [[ "$arg" == *"*"* || "$arg" == *"?"* || "$arg" == *"!("* ]]; then
     shopt -s extglob  # enable !(pattern) for exclusion
     local expanded path abs
     expanded=($(eval "ls -d $arg" 2>/dev/null || true))
     for path in "${expanded[@]}"; do
-      [[ -d "$path" && -f "$path/task.sh" ]] || continue
+      [[ -d "$path" && -f "$path/run.sh" ]] || continue
       abs="$(cd "$path" && pwd)"
       [[ "$abs" == "$tasks_root_abs"* ]] && resolved+=("$abs")
     done
@@ -36,15 +36,15 @@ resolve_arg() {
       echo "Error: Task must be under tasks/: $arg" >&2
       exit 1
     fi
-    if [[ -f "$abs_path/task.sh" ]]; then
+    if [[ -f "$abs_path/run.sh" ]]; then
       resolved+=("$abs_path")
     else
-      # Parent directory: find all descendant dirs with task.sh
+      # Parent directory: find all descendant dirs with run.sh
       while IFS= read -r -d '' path; do
         resolved+=("$(cd "$(dirname "$path")" && pwd)")
-      done < <(find "$abs_path" -name "task.sh" -type f -print0 2>/dev/null)
+      done < <(find "$abs_path" -name "run.sh" -type f -print0 2>/dev/null)
       if [[ ${#resolved[@]} -eq 0 ]]; then
-        echo "Error: No tasks found under $arg (no task.sh in descendents)" >&2
+        echo "Error: No tasks found under $arg (no run.sh in descendents)" >&2
         exit 1
       fi
     fi
@@ -75,12 +75,12 @@ build_task_run_pairs() {
 
     while IFS= read -r task_dir; do
       [[ -z "$task_dir" ]] && continue
-      if [[ "$task_dir" != "$TASKS_DIR"* ]]; then
+      if [[ "$task_dir" != "$TASKS"* ]]; then
         echo "Error: Task must be under tasks/: $task_dir" >&2
         exit 1
       fi
-      if [[ ! -f "$task_dir/task.sh" ]]; then
-        echo "Error: Not a task directory (no task.sh): $task_dir" >&2
+      if [[ ! -f "$task_dir/run.sh" ]]; then
+        echo "Error: Not a task directory (no run.sh): $task_dir" >&2
         exit 1
       fi
 
@@ -107,7 +107,12 @@ build_task_run_pairs() {
           done < <(printf '%s\n' "${runs[@]}" | sort)
           runs=("${sorted[@]}")
         else
-          runs=("assets")
+          local resolved_run_spec
+          resolved_run_spec=$(resolve_task_var "$task_dir" "RUN_SPEC")
+          if [[ -z "$resolved_run_spec" ]]; then
+            resolved_run_spec="assets"
+          fi
+          expand_run_spec "$resolved_run_spec" runs
         fi
       else
         if [[ "$CLEAN" == true ]]; then

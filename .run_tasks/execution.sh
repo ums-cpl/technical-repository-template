@@ -6,34 +6,26 @@ run_task() {
   local run_name="$2"
   local run_folder="$task_dir/$run_name"
 
-  # Collect all env files from tasks/ root down to this task's directory
-  local env_file
-  local env_files=() env_host_files=() env_container_files=()
-  while IFS= read -r env_file; do
-    [[ -n "$env_file" ]] && env_files+=("$env_file")
-  done < <(get_env_files "$task_dir")
-  while IFS= read -r env_file; do
-    [[ -n "$env_file" ]] && env_host_files+=("$env_file")
-  done < <(get_env_host_files "$task_dir")
-  while IFS= read -r env_file; do
-    [[ -n "$env_file" ]] && env_container_files+=("$env_file")
-  done < <(get_env_container_files "$task_dir")
+  # Collect task_meta.sh and run_env.sh files (root-to-leaf)
+  local f
+  local meta_files=() run_env_files=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && meta_files+=("$f")
+  done < <(get_task_meta_files "$task_dir")
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && run_env_files+=("$f")
+  done < <(get_run_env_files "$task_dir")
 
-  # Build source commands: env.sh first, then env_host.sh or env_container.sh
-  local source_cmds_host=""
-  for ef in "${env_files[@]}"; do
-    source_cmds_host+="source \"$ef\"; "
-  done
-  for ef in "${env_host_files[@]}"; do
-    source_cmds_host+="source \"$ef\"; "
+  # Build source commands for task_meta.sh chain
+  local source_cmds_meta=""
+  for f in "${meta_files[@]}"; do
+    source_cmds_meta+="source \"$f\"; "
   done
 
-  local source_cmds_container=""
-  for ef in "${env_files[@]}"; do
-    source_cmds_container+="source \"$ef\"; "
-  done
-  for ef in "${env_container_files[@]}"; do
-    source_cmds_container+="source \"$ef\"; "
+  # Build source commands for run_env.sh chain
+  local source_cmds_run_env=""
+  for f in "${run_env_files[@]}"; do
+    source_cmds_run_env+="source \"$f\"; "
   done
 
   # Build export commands for overrides
@@ -42,21 +34,32 @@ run_task() {
     export_cmds+="export $ov; "
   done
 
-  # Resolve CONTAINER and CONTAINER_GPU from environment (sourcing env files on host)
-  local container_path container_gpu
+  # Resolve CONTAINER and CONTAINER_DEF from task_meta.sh chain with framework vars
+  local container_path container_def container_gpu
   container_path=$(bash -c "
-    export REPOSITORY_ROOT=\"$REPOSITORY_ROOT\"
-    export RUN_FOLDER=\"$run_folder\"
-    export RUN=\"$run_name\"
-    $source_cmds_host
+    export CONTAINERS=\"$CONTAINERS\"
+    export ASSETS=\"$ASSETS\"
+    export TASKS=\"$TASKS\"
+    export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
+    $source_cmds_meta
     $export_cmds
     echo -n \"\${CONTAINER:-}\"
   " | xargs)
+  container_def=$(bash -c "
+    export CONTAINERS=\"$CONTAINERS\"
+    export ASSETS=\"$ASSETS\"
+    export TASKS=\"$TASKS\"
+    export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
+    $source_cmds_meta
+    $export_cmds
+    echo -n \"\${CONTAINER_DEF:-}\"
+  " | xargs)
   container_gpu=$(bash -c "
-    export REPOSITORY_ROOT=\"$REPOSITORY_ROOT\"
-    export RUN_FOLDER=\"$run_folder\"
-    export RUN=\"$run_name\"
-    $source_cmds_host
+    export CONTAINERS=\"$CONTAINERS\"
+    export ASSETS=\"$ASSETS\"
+    export TASKS=\"$TASKS\"
+    export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
+    $source_cmds_meta
     $export_cmds
     echo -n \"\${CONTAINER_GPU:-}\"
   " | xargs)
@@ -69,25 +72,22 @@ run_task() {
   # Error if CONTAINER is set but .sif does not exist
   if [[ -n "$container_path" ]]; then
     if [[ ! -f "$container_path" ]]; then
-      local def_name
-      def_name="$(basename "${container_path%.sif}").def"
       echo "Error: Container image not found: $container_path" >&2
-      echo "Build it with: apptainer build $container_path containers/$def_name" >&2
+      if [[ -n "$container_def" ]]; then
+        echo "Build it with: apptainer build $container_path $container_def" >&2
+      fi
       return 1
     fi
 
-    # Verify container .sif was built from the corresponding .def in containers/
-    if [[ "$SKIP_VERIFY_DEF" != true ]]; then
-      local def_name def_path
-      def_name="$(basename "${container_path%.sif}").def"
-      def_path="$REPOSITORY_ROOT/containers/$def_name"
-      if [[ ! -f "$def_path" ]]; then
-        echo "Error: Definition file not found: $def_path; cannot verify container. Use --skip-verify-def to run anyway." >&2
+    # Verify container .sif was built from CONTAINER_DEF
+    if [[ "$SKIP_VERIFY_DEF" != true ]] && [[ -n "$container_def" ]]; then
+      if [[ ! -f "$container_def" ]]; then
+        echo "Error: Definition file not found: $container_def; cannot verify container. Use --skip-verify-def to run anyway." >&2
         return 1
       fi
       normalize_def() { sed -e 's/^[bB]ootstrap:/Bootstrap:/' -e 's/^[fF]rom:/From:/'; }
-      if ! diff -q <(apptainer inspect --deffile "$container_path" | normalize_def) <(normalize_def < "$def_path") >/dev/null 2>&1; then
-        echo "Error: Container $container_path was not built from $def_path (definitions differ). Rebuild with: apptainer build $container_path $def_path. Use --skip-verify-def to run anyway." >&2
+      if ! diff -q <(apptainer inspect --deffile "$container_path" | normalize_def) <(normalize_def < "$container_def") >/dev/null 2>&1; then
+        echo "Error: Container $container_path was not built from $container_def (definitions differ). Rebuild with: apptainer build $container_path $container_def. Use --skip-verify-def to run anyway." >&2
         return 1
       fi
     fi
@@ -96,37 +96,38 @@ run_task() {
   # Create runner script (self-contained for manual re-runs; invokes apptainer when CONTAINER set)
   mkdir -p "$run_folder"
   local runner_script="$run_folder/.runner_script.sh"
-  local gpu_flag=""
-  [[ -n "$container_gpu" ]] && gpu_flag="--nv "
   cat > "$runner_script" << RUNNER_SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
-export REPOSITORY_ROOT="$REPOSITORY_ROOT"
+export CONTAINERS="$CONTAINERS"
+export ASSETS="$ASSETS"
+export TASKS="$TASKS"
+export WORKLOAD_MANAGERS="$WORKLOAD_MANAGERS"
 export RUN_FOLDER="$run_folder"
-export RUN="$run_name"
 
 # Remove all files in run folder except this script
 find "\$RUN_FOLDER" -mindepth 1 -maxdepth 1 ! -name '.runner_script.sh' -exec rm -rf {} +
 
-# On host: source env_host to get CONTAINER; if set, re-exec self inside apptainer
-if [[ -z "\${CONTAINER_INNER:-}" ]]; then
-  $source_cmds_host
-  if [[ -n "\${CONTAINER:-}" ]]; then
-    gpu_flag=""
-    [[ -n "\${CONTAINER_GPU:-}" ]] && gpu_flag="--nv "
-    exec apptainer exec \$gpu_flag -B "\$REPOSITORY_ROOT:\$REPOSITORY_ROOT" "\$CONTAINER" env CONTAINER_INNER=1 bash "\$(cd "\$(dirname "\$0")" && pwd)/.runner_script.sh"
-  fi
-else
-  :
-  $source_cmds_container
+# Source task_meta.sh chain (static task configuration)
+$source_cmds_meta
+
+# If CONTAINER set and not already inside container, re-exec inside apptainer
+if [[ -z "\${CONTAINER_INNER:-}" ]] && [[ -n "\${CONTAINER:-}" ]]; then
+  gpu_flag=""
+  [[ -n "\${CONTAINER_GPU:-}" ]] && gpu_flag="--nv "
+  exec apptainer exec \$gpu_flag -B "$REPOSITORY_ROOT:$REPOSITORY_ROOT" "\$CONTAINER" env CONTAINER_INNER=1 bash "\$(cd "\$(dirname "\$0")" && pwd)/.runner_script.sh"
 fi
+
+# Export RUN_ID and source run_env.sh chain (runtime helpers)
+export RUN_ID="$run_name"
+$source_cmds_run_env
 $export_cmds
 
 exec > >(tee "\$RUN_FOLDER/.output.log") 2>&1
 cd "\$RUN_FOLDER"
 date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.begin"
 set +e
-. "$task_dir/task.sh"
+. "$task_dir/run.sh"
 task_exit=\$?
 set -e
 if [[ \$task_exit -eq 0 ]]; then

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Configuration variables. REPOSITORY_ROOT and TASKS_DIR are set by the root script before sourcing.
+# Configuration variables. REPOSITORY_ROOT, TASKS, CONTAINERS, ASSETS, WORKLOAD_MANAGERS
+# are set by the root script before sourcing.
 
 declare -a TASK_SPECS=()
 declare -a TASK_RUN_PAIRS=()

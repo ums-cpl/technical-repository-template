@@ -1,91 +1,101 @@
 #!/usr/bin/env bash
 # Environment file collection and dependency resolution.
 
-# Collect env.sh files from tasks/ down to task dir, in root-to-leaf order.
-get_env_files() {
+# Collect task_meta.sh files from tasks/ down to task dir, in root-to-leaf order.
+get_task_meta_files() {
   local task_dir="$1"
-  local rel_path="${task_dir#$TASKS_DIR/}"
-  local env_files=()
-  local current="$TASKS_DIR"
+  local rel_path="${task_dir#$TASKS/}"
+  local files=()
+  local current="$TASKS"
 
+  [[ -f "$current/task_meta.sh" ]] && files+=("$current/task_meta.sh")
   for segment in $(echo "$rel_path" | tr '/' '\n'); do
     current="$current/$segment"
-    [[ -f "$current/env.sh" ]] && env_files+=("$current/env.sh")
+    [[ -f "$current/task_meta.sh" ]] && files+=("$current/task_meta.sh")
   done
 
-  printf '%s\n' "${env_files[@]}"
+  printf '%s\n' "${files[@]}"
 }
 
-# Collect env_host.sh files from tasks/ down to task dir, in root-to-leaf order.
-get_env_host_files() {
+# Collect run_env.sh files from tasks/ down to task dir, in root-to-leaf order.
+get_run_env_files() {
   local task_dir="$1"
-  local rel_path="${task_dir#$TASKS_DIR/}"
-  local env_files=()
-  local current="$TASKS_DIR"
+  local rel_path="${task_dir#$TASKS/}"
+  local files=()
+  local current="$TASKS"
 
+  [[ -f "$current/run_env.sh" ]] && files+=("$current/run_env.sh")
   for segment in $(echo "$rel_path" | tr '/' '\n'); do
     current="$current/$segment"
-    [[ -f "$current/env_host.sh" ]] && env_files+=("$current/env_host.sh")
+    [[ -f "$current/run_env.sh" ]] && files+=("$current/run_env.sh")
   done
 
-  printf '%s\n' "${env_files[@]}"
+  printf '%s\n' "${files[@]}"
 }
 
-# Collect env_container.sh files from tasks/ down to task dir, in root-to-leaf order.
-get_env_container_files() {
+# Collect run_deps.sh files from tasks/ down to task dir, in root-to-leaf order.
+get_run_deps_files() {
   local task_dir="$1"
-  local rel_path="${task_dir#$TASKS_DIR/}"
-  local env_files=()
-  local current="$TASKS_DIR"
+  local rel_path="${task_dir#$TASKS/}"
+  local files=()
+  local current="$TASKS"
 
+  [[ -f "$current/run_deps.sh" ]] && files+=("$current/run_deps.sh")
   for segment in $(echo "$rel_path" | tr '/' '\n'); do
     current="$current/$segment"
-    [[ -f "$current/env_container.sh" ]] && env_files+=("$current/env_container.sh")
+    [[ -f "$current/run_deps.sh" ]] && files+=("$current/run_deps.sh")
   done
 
-  printf '%s\n' "${env_files[@]}"
+  printf '%s\n' "${files[@]}"
 }
 
-# Collect depends.sh files from tasks/ down to task dir, in root-to-leaf order.
-get_depends_files() {
+# Source the task_meta.sh chain in a subshell with framework vars and echo the
+# requested variable. Used to resolve RUN_SPEC, CONTAINER, CONTAINER_DEF per task.
+resolve_task_var() {
   local task_dir="$1"
-  local rel_path="${task_dir#$TASKS_DIR/}"
-  local depends_files=()
-  local current="$TASKS_DIR"
+  local var_name="$2"
 
-  for segment in $(echo "$rel_path" | tr '/' '\n'); do
-    current="$current/$segment"
-    [[ -f "$current/depends.sh" ]] && depends_files+=("$current/depends.sh")
-  done
-
-  printf '%s\n' "${depends_files[@]}"
-}
-
-# Get TASK_DEPENDS for a task by sourcing env files, applying overrides, then depends.sh.
-# Returns array of dependency patterns; empty if no depends.sh or TASK_DEPENDS not set.
-# depends.sh is sourced after env.sh, env_host.sh, and ENV_OVERRIDES so variables are available.
-get_task_depends() {
-  local task_dir="$1"
-  local -n _out=$2
-  _out=()
-  local env_files=() env_host_files=() depends_files=()
-  local env_file
-  while IFS= read -r env_file; do
-    [[ -n "$env_file" ]] && env_files+=("$env_file")
-  done < <(get_env_files "$task_dir")
-  while IFS= read -r env_file; do
-    [[ -n "$env_file" ]] && env_host_files+=("$env_file")
-  done < <(get_env_host_files "$task_dir")
-  while IFS= read -r env_file; do
-    [[ -n "$env_file" ]] && depends_files+=("$env_file")
-  done < <(get_depends_files "$task_dir")
+  local meta_files=()
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && meta_files+=("$f")
+  done < <(get_task_meta_files "$task_dir")
 
   local source_cmds=""
-  for ef in "${env_files[@]}"; do
-    source_cmds+="source \"$ef\"; "
+  for f in "${meta_files[@]}"; do
+    source_cmds+="source \"$f\"; "
   done
-  for ef in "${env_host_files[@]}"; do
-    source_cmds+="source \"$ef\"; "
+
+  bash -c "
+    export CONTAINERS=\"$CONTAINERS\"
+    export ASSETS=\"$ASSETS\"
+    export TASKS=\"$TASKS\"
+    export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
+    $source_cmds
+    echo -n \"\${$var_name:-}\"
+  " 2>/dev/null || true
+}
+
+# Get DEPENDENCIES for a task run by sourcing task_meta.sh chain, then run_deps.sh chain,
+# with framework vars and RUN_ID. Returns array of dependency specs.
+get_task_dependencies() {
+  local task_dir="$1"
+  local run_name="$2"
+  local -n _out=$3
+  _out=()
+
+  local meta_files=() deps_files=()
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && meta_files+=("$f")
+  done < <(get_task_meta_files "$task_dir")
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && deps_files+=("$f")
+  done < <(get_run_deps_files "$task_dir")
+
+  local source_cmds_meta=""
+  for f in "${meta_files[@]}"; do
+    source_cmds_meta+="source \"$f\"; "
   done
 
   local export_cmds=""
@@ -93,22 +103,25 @@ get_task_depends() {
     export_cmds+="export $ov; "
   done
 
-  local depends_source_cmds=""
-  for df in "${depends_files[@]}"; do
-    depends_source_cmds+="source \"$df\"; "
+  local source_cmds_deps=""
+  for f in "${deps_files[@]}"; do
+    source_cmds_deps+="source \"$f\"; "
   done
 
   local dep
   while IFS= read -r dep; do
     [[ -n "$dep" ]] && _out+=("$dep")
   done < <(bash -c "
-    export REPOSITORY_ROOT=\"$REPOSITORY_ROOT\"
-    export RUN_FOLDER=\"$task_dir/assets\"
-    $source_cmds
+    export CONTAINERS=\"$CONTAINERS\"
+    export ASSETS=\"$ASSETS\"
+    export TASKS=\"$TASKS\"
+    export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
+    $source_cmds_meta
+    export RUN_ID=\"$run_name\"
     $export_cmds
-    TASK_DEPENDS=()
-    $depends_source_cmds
-    for d in \"\${TASK_DEPENDS[@]:-}\"; do
+    DEPENDENCIES=()
+    $source_cmds_deps
+    for d in \"\${DEPENDENCIES[@]:-}\"; do
       [[ -n \"\$d\" ]] && echo \"\$d\"
     done
   " 2>/dev/null || true)
