@@ -32,7 +32,7 @@ main() {
       local run_name="${pair#*	}"
       local rel_path="${task_dir#$TASKS/}"
       local run_folder="$task_dir/$run_name"
-      printf "[%d/%d] %s/%s ... " "$op_counter" "$total_ops" "$rel_path" "$run_name"
+      printf "[%0${#total_ops}d/%0${#total_ops}d] %s/%s ... " "$op_counter" "$total_ops" "$rel_path" "$run_name"
       if [[ -d "$run_folder" ]]; then
         if [[ "$DRY_RUN" == true ]]; then
           echo -e "\033[0;90mDRY RUN\033[0m"
@@ -116,7 +116,7 @@ main() {
         [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
         current=$((current + 1))
         local rel_path="${task_dir#$TASKS/}"
-        printf "[%d/%d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
+        printf "[%0${#total_ops}d/%0${#total_ops}d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
         if [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
           echo -e "\033[0;33mSKIPPED\033[0m"
           skipped=$((skipped + 1))
