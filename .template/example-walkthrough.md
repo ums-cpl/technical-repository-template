@@ -2,11 +2,11 @@
 
 ## Overview
 
-This example demonstrates an end-to-end workflow: build, experiment, and plot. The output plot is written to `tasks/plot/assets`. Read this document alongside the main README for full context.
+This example demonstrates an end-to-end workflow: build, experiment, and plot. The output plot is written to `tasks/plot/assets`. Requires an [Apptainer](https://apptainer.org/) installation.
 
 **What the template provides.** The template provides `run_tasks.sh` and requires work to be divided into `assets/` and `tasks/` that run inside `containers/`. The framework handles task resolution, dependencies, and execution.
 
-**What is specific to this example.** How assets and tasks are structured is completely arbitrary. The example shows one best practice: a hierarchical task tree with shared configuration, containerized builds and runs, and assets that accept paths as arguments. With good reason, other structures may be more sensible for different use cases.
+**What is specific to this example.** How assets and tasks are structured is completely chosen by the example. It shows one best practice: a hierarchical task tree with shared configuration, containerized builds and runs, and executables that accept paths as arguments. With good reason, other structures may be more sensible for different use cases.
 
 ## Directory Layout
 
