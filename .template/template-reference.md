@@ -33,6 +33,7 @@ Optional suffix `:RUN_SPEC` overrides the task's `RUN_SPEC` (set in `task_meta.s
 | `--walltime=TIME` | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
 | `--skip-succeeded` | Skip task runs that have already succeeded (`.run_success` exists). |
 | `--skip-verify-def` | Skip verification that container `.sif` matches `containers/*.def` |
+| `--run-disabled` | Run tasks even if `TASK_DISABLED` is set in `task_meta.sh` |
 
 **Examples:**
 
@@ -80,6 +81,7 @@ A **task** is a static definition of work. A **task run** is a concrete executio
 | `CONTAINER_GPU` | Set to `ON` if the container uses a GPU |
 | `RUN_SPEC` | Default task runs to execute (overridden by the CLI `:RUN_SPEC` suffix) |
 | `WORKLOAD_MANAGER` | Workload manager script to use for this task |
+| `TASK_DISABLED` | Set to `true` (or `1`, `yes`) to disable the task; it will be skipped unless `--run-disabled` is used |
 
 ### Task Run: `run_env.sh`, `run_deps.sh`, `run.sh`
 

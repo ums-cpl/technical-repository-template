@@ -22,6 +22,7 @@ Options:
   --workload-manager=SCRIPT  Submit tasks as job array via workload manager script
   --skip-succeeded       Skip task runs that have already succeeded (.run_success exists)
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
+  --run-disabled         Run tasks even if TASK_DISABLED is set in task_meta.sh
   -h, --help             Show this help
 
 Environment overrides (KEY=VALUE) are applied after each sourced file (task_meta.sh, run_env.sh, run_deps.sh), pinning overridden values so every subsequent file sees them.
@@ -84,6 +85,10 @@ parse_args() {
         ;;
       --skip-verify-def)
         SKIP_VERIFY_DEF=true
+        shift
+        ;;
+      --run-disabled)
+        FORCE_DISABLED=true
         shift
         ;;
       -h|--help)

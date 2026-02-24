@@ -105,6 +105,15 @@ build_task_run_pairs() {
         exit 1
       fi
 
+      # Skip disabled tasks unless --run-disabled
+      if [[ "$FORCE_DISABLED" != true ]]; then
+        local task_disabled
+        task_disabled=$(resolve_task_var "$task_dir" "TASK_DISABLED" | tr '[:upper:]' '[:lower:]')
+        case "$task_disabled" in
+          true|1|yes) continue ;;
+        esac
+      fi
+
       # Add to tasks_ordered on first appearance
       if [[ -z "${task_runs[$task_dir]+x}" ]]; then
         tasks_ordered+=("$task_dir")
