@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# Abort whole run on CTRL+C (SIGINT)
+trap 'echo ""; echo "Interrupted. Aborting run." >&2; exit 130' INT
+
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TASKS="$REPOSITORY_ROOT/tasks"
 CONTAINERS="$REPOSITORY_ROOT/containers"
