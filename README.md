@@ -41,7 +41,7 @@ Optional suffix `:RUN_SPEC` overrides the task's `RUN_SPEC` (set in `task_meta.s
 | `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script |
 | `--job-name=NAME` | Job name for workload manager |
 | `--walltime=TIME` | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
-| `--skip-succeeded` | Skip task runs that have already succeeded (`.success` exists). |
+| `--skip-succeeded` | Skip task runs that have already succeeded (`.run_success` exists). |
 | `--skip-verify-def` | Skip verification that container `.sif` matches `containers/*.def` |
 
 **Examples:**
@@ -105,14 +105,16 @@ A **task** is a static definition of work. A **task run** is a concrete executio
 
 **`run_deps.sh`** -- Hierarchical (sourced root-to-leaf). Defines dependencies by writing `DEPENDENCIES` (array of dependency specs). Has the same data and variables available as `run_env.sh`. Each entry is a task path with an optional `:RUN_SPEC` suffix:
 
-- `tasks/task1` -- depends on all runs of task1: every run must have `.success`, and at least one run must exist
+- `tasks/task1` -- depends on all runs of task1: every run must have `.run_success`, and at least one run must exist
 - `tasks/task1:local` -- depends on the `local` run of task1
 - `tasks/task1:run:1:10` -- depends on runs `run1` through `run10` of task1
 - `"tasks/task1:run*"` -- depends on all runs matching `run*` (quote to prevent shell glob expansion)
 
-A dependency is resolved if it is in the current invocation or already has a `.success` file on disk. If neither holds, the runner fails with an error listing the unresolved dependencies. Between stages, the runner verifies that all dependency runs have `.success` files before proceeding.
+A dependency is resolved if it is in the current invocation or already has a `.run_success` file on disk. If neither holds, the runner fails with an error listing the unresolved dependencies. Between stages, the runner verifies that all dependency runs have `.run_success` files before proceeding.
 
 **`run.sh`** -- Leaf-only (one per task, required). The entry point for execution; invokes code from `assets/`. Has all data from the `task_meta.sh` and `run_env.sh` chains available.
+
+Run folders are identified by framework marker files (`.run_script.sh`, `.run_begin`, `.run_success`, `.run_failed`). These distinguish task output directories from task definition directories when resolving tasks.
 
 ### Assets
 

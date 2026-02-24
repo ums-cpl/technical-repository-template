@@ -26,7 +26,7 @@ validate_dependency() {
     local all_disk_ok=true
     local rn
     for rn in "${disk_runs[@]}"; do
-      if [[ ! -f "$dep_task_dir/$rn/.success" ]]; then
+      if [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; then
         all_disk_ok=false
         break
       fi
@@ -71,7 +71,7 @@ validate_dependency() {
       _missing_count_ref=$((_missing_count_ref + 1))
     else
       for rn in "${matched_runs[@]}"; do
-        if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.success" ]]; then
+        if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; then
           local rel_task="${task_dir#$TASKS/}"
           local rel_dep="${dep_task_dir#$TASKS/}"
           _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
@@ -85,7 +85,7 @@ validate_dependency() {
     local -a dep_runs=()
     expand_run_spec "$dep_run_spec" dep_runs
     for rn in "${dep_runs[@]}"; do
-      if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.success" ]]; then
+      if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; then
         local rel_task="${task_dir#$TASKS/}"
         local rel_dep="${dep_task_dir#$TASKS/}"
         _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
@@ -100,8 +100,8 @@ validate_dependency() {
 # Sets _max_stage to max stage id (stages are 0.._max_stage).
 # Populates _task_dep_checks with per-task dependency checks for inter-stage verification.
 # Each DEPENDENCIES entry may include a run suffix (e.g. :local, :run:1:10, :run*).
-# A dependency is resolved if it is in the current invocation or has .success on disk.
-# For task-only deps (no run spec): all runs on disk must have .success, and at least one run must exist (disk or invocation).
+# A dependency is resolved if it is in the current invocation or has .run_success on disk.
+# For task-only deps (no run spec): all runs on disk must have .run_success, and at least one run must exist (disk or invocation).
 compute_stages() {
   local -n _tasks=$1
   local -n _task_run_pairs_ref=$2
@@ -123,7 +123,7 @@ compute_stages() {
   done
 
   # Build dependency map: task -> list of dep tasks (for DAG, deduplicated)
-  # Validate that each dependency is resolved (in invocation or .success on disk)
+  # Validate that each dependency is resolved (in invocation or .run_success on disk)
   # Dependencies are per-run: iterate over task-run pairs, aggregate at the task level.
   declare -A deps
   declare -A dep_edges_added
@@ -235,7 +235,7 @@ compute_stages() {
   _max_stage=$((stage - 1))
 }
 
-# Verify that all dependency runs for tasks in a given stage have .success files.
+# Verify that all dependency runs for tasks in a given stage have .run_success files.
 # Aborts the pipeline if any dependency is unsatisfied.
 check_stage_deps() {
   local stage=$1
@@ -283,7 +283,7 @@ check_stage_deps() {
           unsatisfied+=("tasks/$rel_dep (at least one run required) required by tasks/$rel_task")
         else
           for rn in "${!union_runs[@]}"; do
-            if [[ ! -f "$dep_dir/$rn/.success" ]]; then
+            if [[ ! -f "$dep_dir/$rn/.run_success" ]]; then
               local rel_dep="${dep_dir#$TASKS/}"
               local rel_task="${task_dir#$TASKS/}"
               unsatisfied+=("tasks/$rel_dep/$rn required by tasks/$rel_task")
@@ -293,7 +293,7 @@ check_stage_deps() {
       elif [[ "$check_type" == "RUN" ]]; then
         dep_dir="${rest%%	*}"
         dep_run="${rest#*	}"
-        if [[ ! -f "$dep_dir/$dep_run/.success" ]]; then
+        if [[ ! -f "$dep_dir/$dep_run/.run_success" ]]; then
           local rel_dep="${dep_dir#$TASKS/}"
           local rel_task="${task_dir#$TASKS/}"
           unsatisfied+=("tasks/$rel_dep/$dep_run required by tasks/$rel_task")

@@ -20,7 +20,7 @@ Options:
   --job-name=NAME        Set job name for workload manager (default: run_tasks)
   --walltime=TIME        Set walltime for workload manager (e.g. 1:00:00, 5:00:00)
   --workload-manager=SCRIPT  Submit tasks as job array via workload manager script
-  --skip-succeeded       Skip task runs that have already succeeded (.success exists)
+  --skip-succeeded       Skip task runs that have already succeeded (.run_success exists)
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
   -h, --help             Show this help
 

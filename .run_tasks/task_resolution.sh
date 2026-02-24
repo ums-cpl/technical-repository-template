@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Task resolution and building task-run pairs.
 
+# True if dir is a run folder (has framework marker files). Used to exclude run output from task resolution.
+is_run_folder() {
+  local dir="$1"
+  [[ -f "$dir/.run_script.sh" || -f "$dir/.run_begin" || -f "$dir/.run_success" || -f "$dir/.run_failed" ]]
+}
+
 # Resolves a single argument to a list of absolute task directory paths.
 # Must be called from REPOSITORY_ROOT or with paths relative to it.
 resolve_arg() {
@@ -30,6 +36,7 @@ resolve_arg() {
     expanded=($(eval "ls -d $arg" 2>/dev/null || true))
     for path in "${expanded[@]}"; do
       [[ -d "$path" && -f "$path/run.sh" ]] || continue
+      is_run_folder "$path" && continue
       abs="$(cd "$path" && pwd)"
       [[ "$abs" == "$tasks_root_abs"* ]] && resolved+=("$abs")
     done
@@ -44,12 +51,14 @@ resolve_arg() {
       echo "Error: Task must be under tasks/: $arg" >&2
       exit 1
     fi
-    if [[ -f "$abs_path/run.sh" ]]; then
+    if [[ -f "$abs_path/run.sh" ]] && ! is_run_folder "$abs_path"; then
       resolved+=("$abs_path")
     else
-      # Parent directory: find all descendant dirs with run.sh
+      # Parent directory: find all descendant dirs with run.sh, excluding run folders
+      local dir
       while IFS= read -r -d '' path; do
-        resolved+=("$(cd "$(dirname "$path")" && pwd)")
+        dir="$(cd "$(dirname "$path")" && pwd)"
+        is_run_folder "$dir" || resolved+=("$dir")
       done < <(find "$abs_path" -name "run.sh" -type f -print0 2>/dev/null)
       if [[ ${#resolved[@]} -eq 0 ]]; then
         echo "Error: No tasks found under $arg (no run.sh in descendents)" >&2
@@ -91,6 +100,10 @@ build_task_run_pairs() {
         echo "Error: Not a task directory (no run.sh): $task_dir" >&2
         exit 1
       fi
+      if is_run_folder "$task_dir"; then
+        echo "Error: Not a task directory (is a run folder): $task_dir" >&2
+        exit 1
+      fi
 
       # Add to tasks_ordered on first appearance
       if [[ -z "${task_runs[$task_dir]+x}" ]]; then
@@ -106,6 +119,7 @@ build_task_run_pairs() {
           local run_folder
           for run_folder in "$task_dir"/*/; do
             [[ -d "$run_folder" ]] || continue
+            is_run_folder "$run_folder" || continue
             runs+=("$(basename "$run_folder")")
           done
           shopt -u nullglob

@@ -95,7 +95,7 @@ run_task() {
 
   # Create runner script (self-contained for manual re-runs; invokes apptainer when CONTAINER set)
   mkdir -p "$run_folder"
-  local runner_script="$run_folder/.runner_script.sh"
+  local runner_script="$run_folder/.run_script.sh"
   cat > "$runner_script" << RUNNER_SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
@@ -106,7 +106,7 @@ export WORKLOAD_MANAGERS="$WORKLOAD_MANAGERS"
 export RUN_FOLDER="$run_folder"
 
 # Remove all files in run folder except this script
-find "\$RUN_FOLDER" -mindepth 1 -maxdepth 1 ! -name '.runner_script.sh' -exec rm -rf {} +
+find "\$RUN_FOLDER" -mindepth 1 -maxdepth 1 ! -name '.run_script.sh' -exec rm -rf {} +
 
 # Source task_meta.sh chain (static task configuration)
 $source_cmds_meta
@@ -115,7 +115,7 @@ $source_cmds_meta
 if [[ -z "\${CONTAINER_INNER:-}" ]] && [[ -n "\${CONTAINER:-}" ]]; then
   gpu_flag=""
   [[ -n "\${CONTAINER_GPU:-}" ]] && gpu_flag="--nv "
-  exec apptainer exec \$gpu_flag -B "$REPOSITORY_ROOT:$REPOSITORY_ROOT" "\$CONTAINER" env CONTAINER_INNER=1 bash "\$(cd "\$(dirname "\$0")" && pwd)/.runner_script.sh"
+  exec apptainer exec \$gpu_flag -B "$REPOSITORY_ROOT:$REPOSITORY_ROOT" "\$CONTAINER" env CONTAINER_INNER=1 bash "\$(cd "\$(dirname "\$0")" && pwd)/.run_script.sh"
 fi
 
 # Export RUN_ID and source run_env.sh chain (runtime helpers)
@@ -123,23 +123,23 @@ export RUN_ID="$run_name"
 $source_cmds_run_env
 $export_cmds
 
-exec > >(tee "\$RUN_FOLDER/.output.log") 2>&1
+exec > >(tee "\$RUN_FOLDER/.run_output.log") 2>&1
 cd "\$RUN_FOLDER"
-date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.begin"
+date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.run_begin"
 set +e
 . "$task_dir/run.sh"
 task_exit=\$?
 set -e
 if [[ \$task_exit -eq 0 ]]; then
-  date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.success"
+  date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.run_success"
 else
-  date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.failed"
+  date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.run_failed"
   exit \$task_exit
 fi
 RUNNER_SCRIPT
   chmod u+x "$runner_script"
 
-  # Run task: runner script tees to .output.log; suppress console when invoked from run_tasks.sh
+  # Run task: runner script tees to .run_output.log; suppress console when invoked from run_tasks.sh
   bash "$runner_script" > /dev/null 2>&1
   return $?
 }
@@ -232,11 +232,11 @@ while IFS=$'\t' read -r job_id idx run path; do
     prev_job="$job_id"
   fi
   run_folder="$path/$run"
-  if [[ -f "$run_folder/.success" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.success" ]]; then
+  if [[ -f "$run_folder/.run_success" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.run_success" ]]; then
     status=$'\033[32mSUCCESS\033[0m'
-  elif [[ -f "$run_folder/.failed" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.failed" ]]; then
+  elif [[ -f "$run_folder/.run_failed" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.run_failed" ]]; then
     status=$'\033[31mFAILED\033[0m'
-  elif [[ -f "$run_folder/.begin" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.begin" ]]; then
+  elif [[ -f "$run_folder/.run_begin" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.run_begin" ]]; then
     status=$'\033[92mRUNNING\033[0m'
   else
     status=$'\033[2mPENDING\033[0m'

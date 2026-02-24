@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Run spec expansion and task status.
 
-# Check if a task run has already succeeded (has .success file).
+# Check if a task run has already succeeded (has .run_success file).
 is_task_succeeded() {
   local task_dir="$1"
   local run_name="$2"
-  [[ -f "$task_dir/$run_name/.success" ]]
+  [[ -f "$task_dir/$run_name/.run_success" ]]
 }
 
 # Expand RUN_SPEC to array of run names. Each comma-separated entry is either:
@@ -46,6 +46,7 @@ expand_run_spec_for_clean() {
     local run_folder
     for run_folder in "$task_dir"/*/; do
       [[ -d "$run_folder" ]] || continue
+      is_run_folder "$run_folder" || continue
       local run_name
       run_name=$(basename "$run_folder")
       [[ "$run_name" == $spec ]] && _out+=("$run_name")
