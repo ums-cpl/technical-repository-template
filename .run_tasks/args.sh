@@ -24,7 +24,7 @@ Options:
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
   -h, --help             Show this help
 
-Environment overrides (KEY=VALUE) are applied after sourcing task_meta.sh and run_env.sh files.
+Environment overrides (KEY=VALUE) are applied after each sourced file (task_meta.sh, run_env.sh, run_deps.sh), pinning overridden values so every subsequent file sees them.
 EOF
 }
 

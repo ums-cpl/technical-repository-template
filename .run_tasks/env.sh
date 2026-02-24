@@ -49,6 +49,21 @@ get_run_deps_files() {
   printf '%s\n' "${files[@]}"
 }
 
+# Build source commands with ENV_OVERRIDES interleaved: applied once initially,
+# then after each sourced file. Ensures every file in the chain sees overridden values.
+build_source_cmds_with_overrides() {
+  local -n _files=$1
+  local override_cmds=""
+  for ov in "${ENV_OVERRIDES[@]}"; do
+    override_cmds+="export $ov; "
+  done
+  local result="$override_cmds"
+  for f in "${_files[@]}"; do
+    result+="source \"$f\"; $override_cmds"
+  done
+  echo -n "$result"
+}
+
 # Source the task_meta.sh chain in a subshell with framework vars and echo the
 # requested variable. Used to resolve RUN_SPEC, CONTAINER, CONTAINER_DEF per task.
 resolve_task_var() {
@@ -61,10 +76,8 @@ resolve_task_var() {
     [[ -n "$f" ]] && meta_files+=("$f")
   done < <(get_task_meta_files "$task_dir")
 
-  local source_cmds=""
-  for f in "${meta_files[@]}"; do
-    source_cmds+="source \"$f\"; "
-  done
+  local source_cmds
+  source_cmds=$(build_source_cmds_with_overrides meta_files)
 
   bash -c "
     export CONTAINERS=\"$CONTAINERS\"
@@ -93,20 +106,11 @@ get_task_dependencies() {
     [[ -n "$f" ]] && deps_files+=("$f")
   done < <(get_run_deps_files "$task_dir")
 
-  local source_cmds_meta=""
-  for f in "${meta_files[@]}"; do
-    source_cmds_meta+="source \"$f\"; "
-  done
+  local source_cmds_meta
+  source_cmds_meta=$(build_source_cmds_with_overrides meta_files)
 
-  local export_cmds=""
-  for ov in "${ENV_OVERRIDES[@]}"; do
-    export_cmds+="export $ov; "
-  done
-
-  local source_cmds_deps=""
-  for f in "${deps_files[@]}"; do
-    source_cmds_deps+="source \"$f\"; "
-  done
+  local source_cmds_deps
+  source_cmds_deps=$(build_source_cmds_with_overrides deps_files)
 
   local dep
   while IFS= read -r dep; do
@@ -118,7 +122,6 @@ get_task_dependencies() {
     export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
     $source_cmds_meta
     export RUN_ID=\"$run_name\"
-    $export_cmds
     DEPENDENCIES=()
     $source_cmds_deps
     for d in \"\${DEPENDENCIES[@]:-}\"; do

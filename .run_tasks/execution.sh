@@ -16,23 +16,12 @@ run_task() {
     [[ -n "$f" ]] && run_env_files+=("$f")
   done < <(get_run_env_files "$task_dir")
 
-  # Build source commands for task_meta.sh chain
-  local source_cmds_meta=""
-  for f in "${meta_files[@]}"; do
-    source_cmds_meta+="source \"$f\"; "
-  done
+  # Build source commands with overrides interleaved (task_meta.sh and run_env.sh chains)
+  local source_cmds_meta
+  source_cmds_meta=$(build_source_cmds_with_overrides meta_files)
 
-  # Build source commands for run_env.sh chain
-  local source_cmds_run_env=""
-  for f in "${run_env_files[@]}"; do
-    source_cmds_run_env+="source \"$f\"; "
-  done
-
-  # Build export commands for overrides
-  local export_cmds=""
-  for ov in "${ENV_OVERRIDES[@]}"; do
-    export_cmds+="export $ov; "
-  done
+  local source_cmds_run_env
+  source_cmds_run_env=$(build_source_cmds_with_overrides run_env_files)
 
   # Resolve CONTAINER and CONTAINER_DEF from task_meta.sh chain with framework vars
   local container_path container_def container_gpu
@@ -42,7 +31,6 @@ run_task() {
     export TASKS=\"$TASKS\"
     export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
     $source_cmds_meta
-    $export_cmds
     echo -n \"\${CONTAINER:-}\"
   " | xargs)
   container_def=$(bash -c "
@@ -51,7 +39,6 @@ run_task() {
     export TASKS=\"$TASKS\"
     export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
     $source_cmds_meta
-    $export_cmds
     echo -n \"\${CONTAINER_DEF:-}\"
   " | xargs)
   container_gpu=$(bash -c "
@@ -60,7 +47,6 @@ run_task() {
     export TASKS=\"$TASKS\"
     export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
     $source_cmds_meta
-    $export_cmds
     echo -n \"\${CONTAINER_GPU:-}\"
   " | xargs)
 
@@ -132,7 +118,6 @@ fi
 # Export RUN_ID and source run_env.sh chain (runtime helpers)
 export RUN_ID="$run_name"
 $source_cmds_run_env
-$export_cmds
 
 exec > >(tee "\$RUN_FOLDER/.run_output.log") 2>&1
 cd "\$RUN_FOLDER"

@@ -22,7 +22,7 @@ Used to run tasks.
 ./run_tasks.sh [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
 ```
 
-**KEY=VALUE** pairs are environment overrides applied after sourcing `task_meta.sh` and `run_env.sh` files and can be read inside the run script.
+**KEY=VALUE** pairs are environment overrides. They are applied once initially, then after each sourced file (`task_meta.sh`, `run_env.sh`, `run_deps.sh`), pinning overridden values so every file in the chain sees them.
 
 **TASK** can be:
 
