@@ -6,20 +6,20 @@ A template for technical work organized as tasks. Provides a common repository s
 
 ## Getting Started on the Palma II Cluster
 
-A [getting started guide](palmaII-getting-started.md) is available for users not familiar with the Palma II cluster or SLURM. It explains how to use the cluster without this template. That background is required for making efficient use of the template.
+A [getting started guide](.template/docs/palmaII-getting-started.md) is available for users not familiar with the Palma II cluster or SLURM. It explains how to use the cluster without this template. That background is required for making efficient use of the template.
 
 ## Example Walkthrough
 
-The repository includes an example that demonstrates how to use this template. It illustrates hierarchical configuration, container use, dependencies, and run specs. For a detailed walkthrough of how the example uses the template, see [Example Walkthrough](.template/example-walkthrough.md).
+The repository includes an example that demonstrates how to use this template. It illustrates hierarchical configuration, container use, dependencies, and run specs. For a detailed walkthrough of how the example uses the template, see [Example Walkthrough](.template/docs/example-walkthrough.md).
 
 ## Template Reference
 
-For a concise reference of the template's structure, conventions, and configuration, see [Template Reference](.template/template-reference.md).
+For a concise reference of the template's structure, conventions, and configuration, see [Template Reference](.template/docs/template-reference.md).
 
 ## Best Practices
 
-Recommendations for assets, tasks, containers, and documentation. See [Best Practices](.template/best-practices.md) for details.
+Recommendations for assets, tasks, containers, and documentation. See [Best Practices](.template/docs/best-practices.md) for details.
 
 ## Artifact Packing
 
-This template simplifies creating reproducibility artifacts (e.g., for paper submissions). For a step-by-step guide on gathering assets, creating scripts, and distributing mutable (GitHub) and immutable (Zenodo) versions, see [Artifact Packing](.template/artifact-packing.md).
+This template simplifies creating reproducibility artifacts (e.g., for paper submissions). For a step-by-step guide on gathering assets, creating scripts, and distributing mutable (GitHub) and immutable (Zenodo) versions, see [Artifact Packing](.template/docs/artifact-packing.md).

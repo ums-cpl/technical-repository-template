@@ -12,7 +12,7 @@ TASKS="$REPOSITORY_ROOT/tasks"
 CONTAINERS="$REPOSITORY_ROOT/containers"
 ASSETS="$REPOSITORY_ROOT/assets"
 WORKLOAD_MANAGERS="$REPOSITORY_ROOT/workload_managers"
-RUN_TASKS_LIB="$REPOSITORY_ROOT/.run_tasks"
+RUN_TASKS_LIB="$REPOSITORY_ROOT/.template/scripts"
 
 source "$RUN_TASKS_LIB/config.sh"
 source "$RUN_TASKS_LIB/args.sh"
