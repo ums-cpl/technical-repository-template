@@ -2,9 +2,6 @@
 
 This document is an opinionated guide designed for those not yet familiar with Palma II. It outlines a workflow found to be efficient and practical for running tasks on the [Palma II](https://palma.uni-muenster.de/) HPC cluster at the University of Münster. For comprehensive details and additional possibilities, consult the [official Palma II documentation](https://palma.uni-muenster.de/).
 
-> **Note:** This is a living document and is intended to be improved over time. Any feedback, suggestions, or criticism are very welcome -- please send comments to [Richard](mailto:r.schulze@uni-muenster.de).
-
-
 ## Cluster Architecture Overview
 
 - **Login Node:**  

@@ -1,18 +1,8 @@
-# technical-repository-template
+# Template Reference
 
-A template for technical work organized as tasks. Provides a common repository structure to facilitate collaboration. Use this as a starting point for benchmarks, evaluations, and reproducible experiment workflows.
+This template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code from `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
 
-> **Note:** This is a living template and is intended to be improved over time. Any feedback, suggestions, or criticism are very welcome -- please send comments to [Richard](mailto:r.schulze@uni-muenster.de).
-
-## Getting Started on the Palma II Cluster
-
-A [getting started guide](palmaII-getting-started.md) is available for users not familiar with the Palma II cluster or SLURM. It explains how to use the cluster without this template. That background is required for making efficient use of the template.
-
-## Design
-
-The template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code from `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
-
-### run_tasks.sh
+## run_tasks.sh
 
 Used to run tasks.
 
@@ -54,7 +44,7 @@ Optional suffix `:RUN_SPEC` overrides the task's `RUN_SPEC` (set in `task_meta.s
 ./run_tasks.sh --clean tasks/experiment:run1
 ```
 
-### Tasks
+## Tasks
 
 Tasks are defined as a tree under `tasks/`. A task is a directory containing at least `run.sh`; all other files (`task_meta.sh`, `run_env.sh`, `run_deps.sh`) are optional. Directories under `tasks/` form a hierarchy; any directory with `run.sh` is a task.
 
@@ -68,7 +58,7 @@ A **task** is a static definition of work. A **task run** is a concrete executio
 | Execution | -- | `run.sh` (leaf-only, invokes code from `assets/`) |
 | Dependencies | -- | `run_deps.sh` (hierarchical, writes `DEPENDENCIES`) |
 
-#### Task: `task_meta.sh`
+### Task: `task_meta.sh`
 
 `task_meta.sh` files may appear along the path from `tasks/` to a task directory and are sourced in root-to-leaf order. They define the static configuration for a task.
 
@@ -91,7 +81,7 @@ A **task** is a static definition of work. A **task run** is a concrete executio
 | `RUN_SPEC` | Default task runs to execute (overridden by the CLI `:RUN_SPEC` suffix) |
 | `WORKLOAD_MANAGER` | Workload manager script to use for this task |
 
-#### Task Run: `run_env.sh`, `run_deps.sh`, `run.sh`
+### Task Run: `run_env.sh`, `run_deps.sh`, `run.sh`
 
 **`run_env.sh`** -- Hierarchical (sourced root-to-leaf, like `task_meta.sh`). Defines variables and helper functions for the run. Has all data from the `task_meta.sh` chain available. Available variables:
 
@@ -116,15 +106,15 @@ A dependency is resolved if it is in the current invocation or already has a `.r
 
 Run folders are identified by framework marker files (`.run_script.sh`, `.run_begin`, `.run_success`, `.run_failed`, `.run_metadata`). These distinguish task output directories from task definition directories when resolving tasks.
 
-### Assets
+## Assets
 
 Assets hold the actual implementation of experiments. Structure is flexible; there is no predefined layout. Write outputs to the current working directory (which is `$RUN_FOLDER`) so the task framework manages data placement.
 
-### Containers
+## Containers
 
 Containers provide a fixed environment for running tasks and document how to build experiments. They are runtime-only: all task output is stored on the host. Use Apptainer `.def` files; build with `apptainer build <image>.sif containers/<name>.def`.
 
-### Workload Managers
+## Workload Managers
 
 Workload manager scripts allow running tasks in parallel to reduce overall runtime. `run_tasks.sh` creates a manifest and invokes the script; the script submits one or multiple job arrays where each array element runs one task.
 
@@ -149,51 +139,3 @@ Several pre-defined workload manager scripts are provided in the `workload_manag
 where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task index within that job.
 
 **Manifest format:** Header (SKIP_VERIFY_DEF, env overrides, `---`), then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and `INDEX\tRUN\tPATH` lines per task.
-
-## Best Practices
-
-- **Assets:** Write them as if tasks don't exist—executable by themselves, not reading the `tasks/` folder directly. Accept paths to files/folders (that may be in `tasks/`) as arguments instead.
-- **Tasks:** Keep `run.sh` short and simple; do task-related processing in asset files. Use `task_meta.sh` for shared metadata across a subtree and `run_env.sh` for setting up the environment in which the task is run.
-- **Containers:** Avoid unnecessary bloat to keep image sizes small.
-- **Documentation:** Describe the available tasks and how they are expected to run. For each task (or task group), document its purpose, prerequisites, inputs, outputs, and exact call to `run_tasks.sh` (e.g., via a README).
-
-## Example
-
-The example implements a MatMul benchmark: `tasks/build/` compiles data and experiment binaries; `tasks/experiment/MatMul/` runs experiments for different input sizes and variants (baseline, optimized); `tasks/plot/` generates plots from the results. It illustrates hierarchical configuration via `task_meta.sh`, container use for build and plot, and how assets receive task paths as arguments.
-
-### Running the Example Tasks
-
-```bash
-# 1. Build data and experiment binaries (compiles with the appropriate container)
-./run_tasks.sh tasks/build
-
-# 2. Create data used for experiments
-./run_tasks.sh tasks/experiment/MatMul/*/data
-
-# 3. Run all experiment tasks (except data generation) 5 times
-./run_tasks.sh "tasks/experiment/MatMul/*/!(data):run:1:5"
-
-# 4. Generate plots from experiment results
-./run_tasks.sh tasks/plot
-
-# 5. Clean task data
-./run_tasks.sh --clean tasks
-```
-
-With dependencies declared in `run_deps.sh` (via `DEPENDENCIES`), the workflow can be submitted as a single command:
-
-```bash
-./run_tasks.sh tasks/build tasks/experiment/*/*/data "tasks/experiment/*/*/!(data):run:1:5" tasks/plot
-```
-
-## Artifact Packing
-
-This template simplifies the process of creating an artifact (e.g., a reproducibility artifact for a submission) into the following steps:
-
-1. Gather relevant assets, tasks, containers, workload managers, and `run_tasks.sh` into a new repository.
-2. Create high-level scripts that run the necessary tasks via `run_tasks.sh` (typically: build, create data, run experiments, plot results).
-3. Create an artifact readme.
-4. Distribute:
-   - **Mutable on GitHub:** Most up-to-date version (e.g., including bug fixes) with container definition files only.
-   - **Immutable on Zenodo (or similar):** For paper reference, with both container definition files and built containers. Artifact readme links to GitHub for the latest version.
-   - This separation records the exact environment used for experiments while keeping the GitHub repository small.
