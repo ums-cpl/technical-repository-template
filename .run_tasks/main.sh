@@ -79,12 +79,18 @@ main() {
       exit $?
     fi
 
-    # Direct execution: create manifest (for audit), run stages sequentially, then (task, run) pairs within each stage
+    # Direct execution: compute stages once, create manifest (for audit), run stages sequentially
     declare -A task_stage
     declare -A task_dep_checks
     local max_stage=0
     compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks
 
+    # Store precomputed stages in globals for create_manifest (runs in subshell via command substitution)
+    declare -A RUN_TASKS_PRECOMPUTED_TASK_STAGE
+    for k in "${!task_stage[@]}"; do
+      RUN_TASKS_PRECOMPUTED_TASK_STAGE["$k"]="${task_stage[$k]}"
+    done
+    RUN_TASKS_PRECOMPUTED_MAX_STAGE=$max_stage
     local manifest_path
     manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
     if [[ "$DRY_RUN" == true ]]; then

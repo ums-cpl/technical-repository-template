@@ -1,6 +1,101 @@
 #!/usr/bin/env bash
 # Stage computation and dependency verification.
 
+# Validate a single dependency (task_dir depends on dep_task_dir with dep_run_spec).
+# Updates _missing_deps, _missing_count_ref, and _dep_checks. Used by compute_stages.
+validate_dependency() {
+  local task_dir="$1"
+  local dep_task_dir="$2"
+  local dep_run_spec="$3"
+  local -n _inv_pair_set=$4
+  local -n _inv_task_set=$5
+  local -n _pairs_ref=$6
+  local -n _missing_deps=$7
+  local -n _missing_count_ref=$8
+  local -n _dep_checks=$9
+
+  if [[ -z "$dep_run_spec" ]]; then
+    local -a disk_runs=()
+    shopt -s nullglob
+    local rf
+    for rf in "$dep_task_dir"/*/; do
+      [[ -d "$rf" ]] && disk_runs+=("$(basename "$rf")")
+    done
+    shopt -u nullglob
+
+    local all_disk_ok=true
+    local rn
+    for rn in "${disk_runs[@]}"; do
+      if [[ ! -f "$dep_task_dir/$rn/.success" ]]; then
+        all_disk_ok=false
+        break
+      fi
+    done
+
+    local has_at_least_one=false
+    [[ -n "${_inv_task_set["$dep_task_dir"]+x}" ]] && has_at_least_one=true
+    [[ ${#disk_runs[@]} -gt 0 ]] && has_at_least_one=true
+
+    local resolved_ok=false
+    [[ "$all_disk_ok" == true ]] && [[ "$has_at_least_one" == true ]] && resolved_ok=true
+
+    if [[ "$resolved_ok" != true ]]; then
+      local rel_task="${task_dir#$TASKS/}"
+      local rel_dep="${dep_task_dir#$TASKS/}"
+      _missing_deps["tasks/$rel_dep"]="${_missing_deps["tasks/$rel_dep"]:+${_missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
+      _missing_count_ref=$((_missing_count_ref + 1))
+    fi
+    _dep_checks["$task_dir"]+="ALL	$dep_task_dir"$'\n'
+
+  elif [[ "$dep_run_spec" == *"*"* || "$dep_run_spec" == *"?"* ]]; then
+    local -a matched_runs=()
+    expand_run_spec_for_clean "$dep_task_dir" "$dep_run_spec" matched_runs
+    declare -A _matched_set=()
+    local _mr
+    for _mr in "${matched_runs[@]}"; do _matched_set["$_mr"]=1; done
+    local _inv_pair _inv_td _inv_rn
+    for _inv_pair in "${_pairs_ref[@]}"; do
+      _inv_td="${_inv_pair%%	*}"
+      _inv_rn="${_inv_pair#*	}"
+      if [[ "$_inv_td" == "$dep_task_dir" ]] && [[ "$_inv_rn" == $dep_run_spec ]] \
+         && [[ -z "${_matched_set["$_inv_rn"]+x}" ]]; then
+        matched_runs+=("$_inv_rn")
+        _matched_set["$_inv_rn"]=1
+      fi
+    done
+    if [[ ${#matched_runs[@]} -eq 0 ]]; then
+      local rel_task="${task_dir#$TASKS/}"
+      local rel_dep="${dep_task_dir#$TASKS/}"
+      local dep_label="tasks/$rel_dep:$dep_run_spec (no matching run folders on disk)"
+      _missing_deps["$dep_label"]="${_missing_deps["$dep_label"]:+${_missing_deps["$dep_label"]}, }tasks/$rel_task"
+      _missing_count_ref=$((_missing_count_ref + 1))
+    else
+      for rn in "${matched_runs[@]}"; do
+        if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.success" ]]; then
+          local rel_task="${task_dir#$TASKS/}"
+          local rel_dep="${dep_task_dir#$TASKS/}"
+          _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
+          _missing_count_ref=$((_missing_count_ref + 1))
+        fi
+        _dep_checks["$task_dir"]+="RUN	$dep_task_dir	$rn"$'\n'
+      done
+    fi
+
+  else
+    local -a dep_runs=()
+    expand_run_spec "$dep_run_spec" dep_runs
+    for rn in "${dep_runs[@]}"; do
+      if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.success" ]]; then
+        local rel_task="${task_dir#$TASKS/}"
+        local rel_dep="${dep_task_dir#$TASKS/}"
+        _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
+        _missing_count_ref=$((_missing_count_ref + 1))
+      fi
+      _dep_checks["$task_dir"]+="RUN	$dep_task_dir	$rn"$'\n'
+    done
+  fi
+}
+
 # Compute stages from task dependencies. Populates _task_stage[path]=stage_id.
 # Sets _max_stage to max stage id (stages are 0.._max_stage).
 # Populates _task_dep_checks with per-task dependency checks for inter-stage verification.
@@ -67,87 +162,9 @@ compute_stages() {
           dep_edges_added["$edge_key"]=1
         fi
 
-        if [[ -z "$dep_run_spec" ]]; then
-          # No run_spec: all runs (disk and invocation) must succeed; at least one run required
-          local -a disk_runs=()
-          shopt -s nullglob
-          local rf
-          for rf in "$r"/*/; do
-            [[ -d "$rf" ]] && disk_runs+=("$(basename "$rf")")
-          done
-          shopt -u nullglob
-
-          local all_disk_ok=true
-          local rn
-          for rn in "${disk_runs[@]}"; do
-            if [[ ! -f "$r/$rn/.success" ]]; then
-              all_disk_ok=false
-              break
-            fi
-          done
-
-          local has_at_least_one=false
-          [[ -n "${invocation_task_set["$r"]+x}" ]] && has_at_least_one=true
-          [[ ${#disk_runs[@]} -gt 0 ]] && has_at_least_one=true
-
-          local resolved_ok=false
-          [[ "$all_disk_ok" == true ]] && [[ "$has_at_least_one" == true ]] && resolved_ok=true
-
-          if [[ "$resolved_ok" != true ]]; then
-            local rel_task="${task_dir#$TASKS/}"
-            local rel_dep="${r#$TASKS/}"
-            missing_deps["tasks/$rel_dep"]="${missing_deps["tasks/$rel_dep"]:+${missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
-            missing_count=$((missing_count + 1))
-          fi
-          _task_dep_checks["$task_dir"]+="ALL	$r"$'\n'
-
-        elif [[ "$dep_run_spec" == *"*"* || "$dep_run_spec" == *"?"* ]]; then
-          # Wildcard: expand against existing folders on disk and runs in the current invocation
-          local -a matched_runs=()
-          expand_run_spec_for_clean "$r" "$dep_run_spec" matched_runs
-          # Also match against runs in the current invocation for this dep task
-          declare -A _matched_set=()
-          for _mr in "${matched_runs[@]}"; do _matched_set["$_mr"]=1; done
-          for _inv_pair in "${_task_run_pairs_ref[@]}"; do
-            local _inv_td="${_inv_pair%%	*}" _inv_rn="${_inv_pair#*	}"
-            if [[ "$_inv_td" == "$r" ]] && [[ "$_inv_rn" == $dep_run_spec ]] \
-               && [[ -z "${_matched_set["$_inv_rn"]+x}" ]]; then
-              matched_runs+=("$_inv_rn")
-              _matched_set["$_inv_rn"]=1
-            fi
-          done
-          if [[ ${#matched_runs[@]} -eq 0 ]]; then
-            local rel_task="${task_dir#$TASKS/}"
-            local rel_dep="${r#$TASKS/}"
-            local dep_label="tasks/$rel_dep:$dep_run_spec (no matching run folders on disk)"
-            missing_deps["$dep_label"]="${missing_deps["$dep_label"]:+${missing_deps["$dep_label"]}, }tasks/$rel_task"
-            missing_count=$((missing_count + 1))
-          else
-            for rn in "${matched_runs[@]}"; do
-              if [[ -z "${invocation_pair_set["$r	$rn"]+x}" ]] && [[ ! -f "$r/$rn/.success" ]]; then
-                local rel_task="${task_dir#$TASKS/}"
-                local rel_dep="${r#$TASKS/}"
-                missing_deps["tasks/$rel_dep:$rn"]="${missing_deps["tasks/$rel_dep:$rn"]:+${missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
-                missing_count=$((missing_count + 1))
-              fi
-              _task_dep_checks["$task_dir"]+="RUN	$r	$rn"$'\n'
-            done
-          fi
-
-        else
-          # Literal/range: expand and validate each run
-          local -a dep_runs=()
-          expand_run_spec "$dep_run_spec" dep_runs
-          for rn in "${dep_runs[@]}"; do
-            if [[ -z "${invocation_pair_set["$r	$rn"]+x}" ]] && [[ ! -f "$r/$rn/.success" ]]; then
-              local rel_task="${task_dir#$TASKS/}"
-              local rel_dep="${r#$TASKS/}"
-              missing_deps["tasks/$rel_dep:$rn"]="${missing_deps["tasks/$rel_dep:$rn"]:+${missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
-              missing_count=$((missing_count + 1))
-            fi
-            _task_dep_checks["$task_dir"]+="RUN	$r	$rn"$'\n'
-          done
-        fi
+        validate_dependency "$task_dir" "$r" "$dep_run_spec" \
+          invocation_pair_set invocation_task_set _task_run_pairs_ref \
+          missing_deps missing_count _task_dep_checks
       done
     done
   done

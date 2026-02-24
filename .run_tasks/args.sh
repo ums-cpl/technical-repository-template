@@ -29,6 +29,11 @@ EOF
 }
 
 # Parse TASK arg into task_path and run_spec. Split on first ':'.
+# Used for both CLI TASK specs and DEPENDENCIES in run_deps.sh.
+# Examples: "tasks/build/data:gcc" -> path="tasks/build/data", run_spec="gcc";
+#           "tasks/build/data:run:1:10" -> path="tasks/build/data", run_spec="run:1:10" (range).
+# Edge cases: Windows paths like C:\path break (first colon separates drive). Assumes Unix-style paths.
+# Bare ":local" (no path) is invalid. Double colon "path::run" yields run_spec=":run" (literal).
 parse_task_spec() {
   local arg="$1"
   if [[ "$arg" == *:* ]]; then

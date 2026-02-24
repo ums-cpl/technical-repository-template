@@ -146,6 +146,8 @@ RUNNER_SCRIPT
 
 # Creates a single manifest file with multiple jobs, each with tasks and dependencies.
 # Format: header (SKIP_VERIFY_DEF, env overrides, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH.
+# When RUN_TASKS_PRECOMPUTED_TASK_STAGE and RUN_TASKS_PRECOMPUTED_MAX_STAGE are set (by main for direct
+# execution), uses them instead of calling compute_stages. Avoids duplicate stage computation.
 create_manifest() {
   local -n _task_run_pairs=$1
   local -n _tasks_unique=$2
@@ -154,7 +156,16 @@ create_manifest() {
   declare -A task_stage
   declare -A task_dep_checks
   local max_stage=0
-  compute_stages "$2" "$1" task_stage max_stage task_dep_checks
+  if [[ -n "${RUN_TASKS_PRECOMPUTED_MAX_STAGE+1}" ]]; then
+    local k
+    for k in "${!RUN_TASKS_PRECOMPUTED_TASK_STAGE[@]}"; do
+      task_stage["$k"]="${RUN_TASKS_PRECOMPUTED_TASK_STAGE[$k]}"
+    done
+    max_stage=$RUN_TASKS_PRECOMPUTED_MAX_STAGE
+    unset RUN_TASKS_PRECOMPUTED_TASK_STAGE RUN_TASKS_PRECOMPUTED_MAX_STAGE
+  else
+    compute_stages "$2" "$1" task_stage max_stage task_dep_checks
+  fi
 
   job_safe="${JOB_NAME:-run_tasks}"
   job_safe="${job_safe//[\/ ]/_}"

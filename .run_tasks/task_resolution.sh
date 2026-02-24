@@ -16,7 +16,15 @@ resolve_arg() {
 
   # Handle wildcards: expand glob and filter to dirs with run.sh
     # (* and ? = standard glob; !( = extglob exclusion)
+    # Note: arg comes from user-controlled run_deps.sh; glob chars (*?!) are safe.
     if [[ "$arg" == *"*"* || "$arg" == *"?"* || "$arg" == *"!("* ]]; then
+    # Reject shell metacharacters that could enable injection in eval. Allow () for extglob !(pattern).
+    case "$arg" in
+      *';'*|*'|'*|*'&'*|*'`'*|*'$'*)
+        echo "Error: Path contains invalid characters: $arg" >&2
+        exit 1
+        ;;
+    esac
     shopt -s extglob  # enable !(pattern) for exclusion
     local expanded path abs
     expanded=($(eval "ls -d $arg" 2>/dev/null || true))
