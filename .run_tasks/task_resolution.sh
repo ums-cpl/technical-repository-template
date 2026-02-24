@@ -4,7 +4,7 @@
 # True if dir is a run folder (has framework marker files). Used to exclude run output from task resolution.
 is_run_folder() {
   local dir="$1"
-  [[ -f "$dir/.run_script.sh" || -f "$dir/.run_begin" || -f "$dir/.run_success" || -f "$dir/.run_failed" ]]
+  [[ -f "$dir/.run_script.sh" || -f "$dir/.run_begin" || -f "$dir/.run_success" || -f "$dir/.run_failed" || -f "$dir/.run_metadata" ]]
 }
 
 # Resolves a single argument to a list of absolute task directory paths.

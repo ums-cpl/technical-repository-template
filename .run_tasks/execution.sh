@@ -93,6 +93,16 @@ run_task() {
     fi
   fi
 
+  # For metadata: was container verified? (only relevant when CONTAINER is set)
+  container_verified="n/a"
+  if [[ -n "$container_path" ]]; then
+    if [[ "$SKIP_VERIFY_DEF" == true ]] || [[ -z "$container_def" ]]; then
+      container_verified="skipped"
+    else
+      container_verified="true"
+    fi
+  fi
+
   # Create runner script (self-contained for manual re-runs; invokes apptainer when CONTAINER set)
   mkdir -p "$run_folder"
   local runner_script="$run_folder/.run_script.sh"
@@ -103,6 +113,7 @@ export CONTAINERS="$CONTAINERS"
 export ASSETS="$ASSETS"
 export TASKS="$TASKS"
 export WORKLOAD_MANAGERS="$WORKLOAD_MANAGERS"
+export REPOSITORY_ROOT="$REPOSITORY_ROOT"
 export RUN_FOLDER="$run_folder"
 
 # Remove all files in run folder except this script
@@ -125,6 +136,47 @@ $export_cmds
 
 exec > >(tee "\$RUN_FOLDER/.run_output.log") 2>&1
 cd "\$RUN_FOLDER"
+{
+  echo "=== git ==="
+  if [[ -n "\${REPOSITORY_ROOT:-}" ]] && git -C "\$REPOSITORY_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "\$REPOSITORY_ROOT" status 2>/dev/null || true
+    echo "---"
+    git -C "\$REPOSITORY_ROOT" rev-parse HEAD 2>/dev/null || true
+  else
+    echo "not a git repository"
+  fi
+  echo ""
+  echo "=== container ==="
+  echo "container: ${container_path:-}"
+  echo "container_def: ${container_def:-}"
+  echo "verified: $container_verified"
+  echo ""
+  echo "=== environment ==="
+  env 2>/dev/null | sort || true
+  echo ""
+  echo "=== hardware ==="
+  echo "--- cpu ---"
+  echo "cores: \$(nproc 2>/dev/null || echo N/A)"
+  if command -v lscpu >/dev/null 2>&1; then
+    lscpu 2>/dev/null || true
+  else
+    grep -E '^model name|^cpu MHz' /proc/cpuinfo 2>/dev/null | head -4 || echo "N/A"
+  fi
+  echo ""
+  echo "--- memory ---"
+  if command -v free >/dev/null 2>&1; then
+    free -h 2>/dev/null || true
+  else
+    grep MemTotal /proc/meminfo 2>/dev/null || echo "N/A"
+  fi
+  echo ""
+  echo "--- gpu ---"
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=name,memory.total,memory.used,clocks.current.graphics --format=csv 2>/dev/null || echo "N/A"
+  else
+    echo "N/A"
+  fi
+} > "\$RUN_FOLDER/.run_metadata"
 date "+%Y-%m-%d %H:%M:%S %Z" > "\$RUN_FOLDER/.run_begin"
 set +e
 . "$task_dir/run.sh"

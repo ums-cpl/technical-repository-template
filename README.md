@@ -114,7 +114,7 @@ A dependency is resolved if it is in the current invocation or already has a `.r
 
 **`run.sh`** -- Leaf-only (one per task, required). The entry point for execution; invokes code from `assets/`. Has all data from the `task_meta.sh` and `run_env.sh` chains available.
 
-Run folders are identified by framework marker files (`.run_script.sh`, `.run_begin`, `.run_success`, `.run_failed`). These distinguish task output directories from task definition directories when resolving tasks.
+Run folders are identified by framework marker files (`.run_script.sh`, `.run_begin`, `.run_success`, `.run_failed`, `.run_metadata`). These distinguish task output directories from task definition directories when resolving tasks.
 
 ### Assets
 
