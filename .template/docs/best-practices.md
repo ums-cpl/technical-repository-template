@@ -134,7 +134,7 @@ This document describes recommended practices for repositories based on this tem
 
 **Example:**
 
-- Use a minimal base (e.g., `ubuntu:22.04` with only required packages) instead of a full desktop or development stack when the task only needs a compiler and runtime.
+- Use a minimal base with only required packages instead of a full desktop or development stack when the task only needs a compiler and runtime.
 
 ### Separate runtime environments for independent assets
 
