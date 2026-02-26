@@ -72,10 +72,22 @@ run_task() {
         return 1
       fi
       normalize_def() { sed -e 's/^[bB]ootstrap:/Bootstrap:/' -e 's/^[fF]rom:/From:/'; }
-      if ! diff -q <(apptainer inspect --deffile "$container_path" | normalize_def) <(normalize_def < "$container_def") >/dev/null 2>&1; then
+      diff_log="$run_folder/.container_verify_diff.log"
+      diff_out=$(mktemp)
+      if ! diff <(apptainer inspect --deffile "$container_path" | normalize_def) <(normalize_def < "$container_def") > "$diff_out" 2>&1; then
+        mkdir -p "$run_folder"
+        {
+          echo "Container definition verification failed."
+          echo "Comparing: embedded def in $container_path vs. $container_def"
+          echo "---"
+          cat "$diff_out"
+        } > "$diff_log"
+        rm -f "$diff_out"
         echo "Error: Container $container_path was not built from $container_def (definitions differ). Rebuild with: apptainer build $container_path $container_def. Use --skip-verify-def to run anyway." >&2
+        echo "Diff written to $diff_log" >&2
         return 1
       fi
+      rm -f "$diff_out"
     fi
   fi
 
