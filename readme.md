@@ -16,6 +16,10 @@ The repository includes an example that demonstrates how to use this template. I
 
 For a concise reference of the template's structure, conventions, and configuration, see [Template Reference](.template/docs/template-reference.md).
 
+## Tips and Tricks
+
+Practical advice for common workflows. See [Tips and Tricks](.template/docs/tips-and-tricks.md) for details.
+
 ## Best Practices
 
 Recommendations for assets, tasks, containers, and documentation. See [Best Practices](.template/docs/best-practices.md) for details.
