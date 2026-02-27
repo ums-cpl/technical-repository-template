@@ -23,6 +23,7 @@ Options:
   --skip-succeeded       Skip task runs that have already succeeded (.run_success exists)
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
   --run-disabled         Run tasks even if TASK_DISABLED is set in task_meta.sh
+  --include-deps         Include missing dependency task runs in the invocation instead of failing
   -h, --help             Show this help
 
 Environment overrides (KEY=VALUE) are applied after each sourced file (task_meta.sh, run_env.sh, run_deps.sh), pinning overridden values so every subsequent file sees them.
@@ -89,6 +90,10 @@ parse_args() {
         ;;
       --run-disabled)
         FORCE_DISABLED=true
+        shift
+        ;;
+      --include-deps)
+        INCLUDE_DEPS=true
         shift
         ;;
       -h|--help)

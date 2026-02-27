@@ -34,6 +34,7 @@ Optional suffix `:RUN_SPEC` overrides the task's `RUN_SPEC` (set in `task_meta.s
 | `--skip-succeeded` | Skip task runs that have already succeeded (`.run_success` exists). |
 | `--skip-verify-def` | Skip verification that container `.sif` matches `containers/*.def` |
 | `--run-disabled` | Run tasks even if `TASK_DISABLED` is set in `task_meta.sh` |
+| `--include-deps` | Include missing dependency task runs in the invocation instead of failing |
 
 **Examples:**
 

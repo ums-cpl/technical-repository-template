@@ -51,6 +51,47 @@ main() {
     echo "Cleaned $total_ops run(s) for $total task(s)$([[ "$DRY_RUN" == true ]] && echo " (dry run)" || true)."
     exit 0
   else
+    # Resolve dependencies (and optionally include missing)
+    declare -A task_stage
+    declare -A task_dep_checks
+    local max_stage=0
+    while true; do
+      local cs_status=0
+      compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks || cs_status=$?
+      if [[ $cs_status -eq 0 ]]; then break; fi
+      if [[ "$INCLUDE_DEPS" != true ]] || [[ ${#RUN_TASKS_MISSING_SPECS[@]} -eq 0 ]]; then
+        exit 1
+      fi
+      local added=0
+      local spec existing
+      for spec in "${RUN_TASKS_MISSING_SPECS[@]}"; do
+        local found=false
+        for existing in "${TASK_SPECS[@]}"; do
+          [[ "$existing" == "$spec" ]] && { found=true; break; }
+        done
+        if [[ "$found" != true ]]; then
+          TASK_SPECS+=("$spec")
+          added=1
+        fi
+      done
+      if [[ $added -eq 0 ]]; then
+        echo "Error: The following dependencies could not be included (disabled or invalid):" >&2
+        for spec in "${RUN_TASKS_MISSING_SPECS[@]}"; do
+          echo "  - $spec" >&2
+        done
+        echo "" >&2
+        echo "Use --run-disabled to run disabled dependency tasks." >&2
+        exit 1
+      fi
+      build_task_run_pairs
+    done
+
+    # Store precomputed stages in globals for create_manifest (runs in subshell via command substitution)
+    declare -A RUN_TASKS_PRECOMPUTED_TASK_STAGE
+    for k in "${!task_stage[@]}"; do
+      RUN_TASKS_PRECOMPUTED_TASK_STAGE["$k"]="${task_stage[$k]}"
+    done
+    RUN_TASKS_PRECOMPUTED_MAX_STAGE=$max_stage
     local total=${#TASKS_UNIQUE[@]}
 
     # Workload manager path: create manifest, invoke workload manager (single arg)
@@ -79,18 +120,7 @@ main() {
       exit $?
     fi
 
-    # Direct execution: compute stages once, create manifest (for audit), run stages sequentially
-    declare -A task_stage
-    declare -A task_dep_checks
-    local max_stage=0
-    compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks
-
-    # Store precomputed stages in globals for create_manifest (runs in subshell via command substitution)
-    declare -A RUN_TASKS_PRECOMPUTED_TASK_STAGE
-    for k in "${!task_stage[@]}"; do
-      RUN_TASKS_PRECOMPUTED_TASK_STAGE["$k"]="${task_stage[$k]}"
-    done
-    RUN_TASKS_PRECOMPUTED_MAX_STAGE=$max_stage
+    # Direct execution: create manifest (for audit), run stages sequentially
     local manifest_path
     manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
     if [[ "$DRY_RUN" == true ]]; then

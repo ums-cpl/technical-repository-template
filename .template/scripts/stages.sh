@@ -170,6 +170,20 @@ compute_stages() {
   done
 
   if [[ $missing_count -gt 0 ]]; then
+    if [[ "$INCLUDE_DEPS" == true ]]; then
+      RUN_TASKS_MISSING_SPECS=()
+      for dep in "${!missing_deps[@]}"; do
+        local spec
+        if [[ "$dep" == *" (no matching run folders on disk)" ]]; then
+          # Wildcard run spec with no runs on disk: use task path only so task's RUN_SPEC is used
+          spec="${dep%%:*}"
+        else
+          spec="${dep% (no matching run folders on disk)}"
+        fi
+        RUN_TASKS_MISSING_SPECS+=("$spec")
+      done
+      return 1
+    fi
     echo "Error: The following dependencies are neither in the current invocation nor satisfied on disk:" >&2
     for dep in "${!missing_deps[@]}"; do
       echo "  - $dep" >&2
