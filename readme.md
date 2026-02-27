@@ -1,4 +1,4 @@
-# technical-repository-template
+# task-driven-experimentation
 
 A template for technical work organized as tasks. Provides a common repository structure to facilitate collaboration. Use this as a starting point for benchmarks, evaluations, and reproducible experiment workflows.
 
