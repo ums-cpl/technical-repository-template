@@ -10,7 +10,56 @@ This example demonstrates an end-to-end workflow: build, experiment, and plot. T
 
 ## Directory Layout
 
-The example populates the four top-level directories: `assets/`, `containers/`, `tasks/`, and `workload_managers/`. See the repository for the full directory tree.
+The example populates the four top-level directories: `assets/`, `containers/`, `tasks/`, and `workload_managers/`. The following tree shows the layout and key files used in this walkthrough. See the following sections for details.
+
+```
+.
+|-- run_tasks.sh                 # Main entry point for running tasks
+|
+|-- assets/                      # Implementation: data generation, experiments, plotting
+|   |-- data/
+|   |   |-- data_helper.h        # Shared helper providing data utility functions
+|   |   |-- matmul.cpp           # Gold implementation generating inputs and expected outputs
+|   |  
+|   |-- experiments/
+|   |   |-- baseline
+|   |   |   |-- matmul.cpp       # Experiment measuring runtimes of a baseline matmul
+|   |   |
+|   |   |-- optimized
+|   |       |-- matmul.cpp       # Experiment measuring runtimes of an optimized matmul
+|   |  
+|   |-- plots/
+|       |-- runtimes.py          # Plotting script comparing baseline and optimized runtimes
+|
+|-- containers/
+|   |-- gcc.def                  # Build container (compile C++)
+|   |-- plot.def                 # Plot container (run Python)
+|
+|-- tasks/
+|   |-- build/                   # Build tasks: build containers + binaries
+|   |   |-- containers/
+|   |   |   |-- gcc/             # Build gcc.def into gcc.sif
+|   |   |   |-- plot/            # Build plot.def into plot.sif
+|   |   |-- data/                # Compile data binary
+|   |   |-- baseline/            # Compile baseline binary
+|   |   |-- optimized/           # Compile optimized binary
+|   |
+|   |-- experiment/MatMul/      # Experiment tasks: run matmul variants for two input sizes
+|   |   |-- IS1/
+|   |   |   |-- data/            # Generate data for this input size
+|   |   |   |-- baseline/        # Run baseline (repeated runs)
+|   |   |   |-- optimized/
+|   |   |-- IS2/
+|   |   |   |-- data/
+|   |   |   |-- baseline/
+|   |   |   |-- optimized/
+|   |
+|   |-- plot/                    # Plot task: aggregate results
+|
+|-- workload_managers/           # workload manager scripts
+    |-- palmaII-skylake.sh       # e.g. palmaII-skylake.sh for cluster runs
+    |-- ...
+```
 
 ## Assets
 
