@@ -1,0 +1,11 @@
+# Override before first task only; second task accumulates both
+FOO=1 tasks/build/containers/gcc FOO=2 tasks/build/data
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/gcc	FOO=1
+JOB	1
+DEPENDS	0
+0	assets	tasks/build/data	FOO=2

@@ -71,24 +71,70 @@ resolve_arg() {
   )
 }
 
-# Build TASK_RUN_PAIRS and TASKS_UNIQUE from TASK_SPECS.
-# TASK_RUN_PAIRS: array of "task_dir<TAB>run_name" in run-first, task-second order
-# TASKS_UNIQUE: deduplicated task dirs for stage computation
+# Reduce tab-separated KEY=VALUE list to final value per key (last occurrence wins).
+# Output: tab-separated KEY=VALUE (order = last occurrence of each key).
+reduce_override_to_final_per_key() {
+  local tsv="$1"
+  if [[ -z "$tsv" ]]; then
+    return
+  fi
+  local -a parts=()
+  IFS=$'\t' read -ra parts <<< "$tsv"
+  declare -A ov=()
+  local -a out_keys=()
+  local p key
+  for p in "${parts[@]}"; do
+    [[ "$p" != *=* ]] && continue
+    key="${p%%=*}"
+    ov["$key"]="${p#*=}"
+    # Keep order of last occurrence: remove key if present, then append
+    local -a new_order=()
+    local k
+    for k in "${out_keys[@]}"; do
+      [[ "$k" != "$key" ]] && new_order+=("$k")
+    done
+    out_keys=("${new_order[@]}" "$key")
+  done
+  local i=0
+  for key in "${out_keys[@]}"; do
+    [[ -z "${ov[$key]+x}" ]] && continue
+    [[ $i -gt 0 ]] && printf '\t'
+    printf '%s=%s' "$key" "${ov[$key]}"
+    ((i++)) || true
+  done
+}
+
+# Build TASK_RUN_PAIRS, TASK_RUN_PAIR_OVERRIDES, TASK_RUN_PAIR_OCC_KEYS, TASK_OCC_KEYS, TASKS_UNIQUE from TASK_SPECS.
+# Overrides are per-spec (TASK_SPEC_OVERRIDES). Same (task_dir, override_snapshot) = same occurrence group (OCC:N).
+# Pairs are emitted in spec order; within each spec, run-first task-second order. Duplicate (task_dir, run_name) across specs allowed.
 build_task_run_pairs() {
   TASK_RUN_PAIRS=()
+  TASK_RUN_PAIR_OVERRIDES=()
+  TASK_RUN_PAIR_OCC_KEYS=()
+  TASK_OCC_KEYS=()
   TASKS_UNIQUE=()
-  local -a tasks_ordered=()
-  declare -A task_runs=()
+  declare -A occ_key_by_task_override=()
+  local occ_counter=0
+  local -a pairs_with_override=()
+  local spec_idx=0
 
-  local spec task_path run_spec
   for spec in "${TASK_SPECS[@]}"; do
+    [[ -z "$spec" ]] && ((spec_idx++)) || true
     [[ -z "$spec" ]] && continue
+    local override_tsv="${TASK_SPEC_OVERRIDES[$spec_idx]:-}"
+    ENV_OVERRIDES=()
+    if [[ -n "$override_tsv" ]]; then
+      IFS=$'\t' read -ra ENV_OVERRIDES <<< "$override_tsv"
+    fi
     local parsed
     set -f
     parsed=($(parse_task_spec "$spec"))
     set +f
-    task_path="${parsed[0]}"
-    run_spec="${parsed[1]:-}"
+    local task_path="${parsed[0]}"
+    local run_spec="${parsed[1]:-}"
+
+    local -a tasks_ordered=()
+    declare -A task_runs=()
 
     while IFS= read -r task_dir; do
       [[ -z "$task_dir" ]] && continue
@@ -105,7 +151,6 @@ build_task_run_pairs() {
         exit 1
       fi
 
-      # Skip disabled tasks unless --run-disabled
       if [[ "$FORCE_DISABLED" != true ]]; then
         local task_disabled
         task_disabled=$(resolve_task_var "$task_dir" "TASK_DISABLED" | tr '[:upper:]' '[:lower:]')
@@ -114,13 +159,10 @@ build_task_run_pairs() {
         esac
       fi
 
-      # Add to tasks_ordered on first appearance
       if [[ -z "${task_runs[$task_dir]+x}" ]]; then
         tasks_ordered+=("$task_dir")
-        TASKS_UNIQUE+=("$task_dir")
       fi
 
-      # Get runs for this task
       local -a runs=()
       if [[ -z "$run_spec" ]]; then
         if [[ "$CLEAN" == true ]]; then
@@ -153,32 +195,68 @@ build_task_run_pairs() {
         fi
       fi
 
-      # Merge runs into task_runs
       local existing="${task_runs[$task_dir]:-}"
       for r in "${runs[@]}"; do
         existing="${existing:+$existing }$r"
       done
       task_runs["$task_dir"]="$existing"
     done < <(resolve_arg "$task_path" "$REPOSITORY_ROOT")
-  done
 
-  # Build TASK_RUN_PAIRS in run-first, task-second order
-  local max_runs=0
-  local t
-  for t in "${tasks_ordered[@]}"; do
-    local -a truns=()
-    read -ra truns <<< "${task_runs[$t]:-}"
-    [[ ${#truns[@]} -gt $max_runs ]] && max_runs=${#truns[@]}
-  done
-
-  local run_idx
-  for ((run_idx=0; run_idx < max_runs; run_idx++)); do
+    # Emit pairs for this spec in run-first, task-second order
+    local max_runs=0
+    local t
     for t in "${tasks_ordered[@]}"; do
       local -a truns=()
       read -ra truns <<< "${task_runs[$t]:-}"
-      if [[ $run_idx -lt ${#truns[@]} ]]; then
-        TASK_RUN_PAIRS+=("$t	${truns[$run_idx]}")
-      fi
+      [[ ${#truns[@]} -gt $max_runs ]] && max_runs=${#truns[@]}
     done
+    local run_idx
+    for ((run_idx=0; run_idx < max_runs; run_idx++)); do
+      for t in "${tasks_ordered[@]}"; do
+        local -a truns=()
+        read -ra truns <<< "${task_runs[$t]:-}"
+        if [[ $run_idx -lt ${#truns[@]} ]]; then
+          pairs_with_override+=("$t	${truns[$run_idx]}	$override_tsv")
+        fi
+      done
+    done
+
+    ((spec_idx++)) || true
+  done
+
+  # Assign occurrence keys and build output arrays
+  local pair_override
+  for pair_override in "${pairs_with_override[@]}"; do
+    local task_dir="${pair_override%%	*}"
+    local rest="${pair_override#*	}"
+    local run_name="${rest%%	*}"
+    local ov_tsv="${rest#*	}"
+    if [[ "$ov_tsv" == "$run_name" ]]; then
+      ov_tsv=""
+    fi
+
+    local occ_key
+    if [[ -z "${occ_key_by_task_override["$task_dir	$ov_tsv"]+x}" ]]; then
+      occ_key="$task_dir	OCC:$occ_counter"
+      occ_key_by_task_override["$task_dir	$ov_tsv"]="$occ_key"
+      TASK_OCC_KEYS+=("$occ_key")
+      ((occ_counter++)) || true
+    else
+      occ_key="${occ_key_by_task_override["$task_dir	$ov_tsv"]}"
+    fi
+
+    TASK_RUN_PAIRS+=("$task_dir	$run_name")
+    TASK_RUN_PAIR_OVERRIDES+=("$(reduce_override_to_final_per_key "$ov_tsv")")
+    TASK_RUN_PAIR_OCC_KEYS+=("$occ_key")
+  done
+
+  # TASKS_UNIQUE: unique task dirs for display (first occurrence order)
+  declare -A seen_task=()
+  for pair_override in "${pairs_with_override[@]}"; do
+    local task_dir="${pair_override%%	*}"
+    if [[ -z "${seen_task[$task_dir]+x}" ]]; then
+      seen_task["$task_dir"]=1
+      TASKS_UNIQUE+=("$task_dir")
+    fi
   done
 }

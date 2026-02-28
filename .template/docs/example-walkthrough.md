@@ -76,7 +76,7 @@ The example uses two container definitions: one for compilation and one for plot
 
 Container build tasks (`tasks/build/containers/gcc/` and `tasks/build/containers/plot/`) run `apptainer build` and need no `task_meta.sh`. Compilation tasks (`tasks/build/data/`, `tasks/build/baseline/`, `tasks/build/optimized/`) each compile a different asset source file. Each compilation task sets `CONTAINER` and `CONTAINER_DEF` in its own `task_meta.sh` and declares a dependency on the container build task via `run_deps.sh`.
 
-Build tasks use `RUN_SPEC=$BUILD_FOLDER`, which gives them a single named run folder. The `BUILD_FOLDER` variable enables running tasks independently on multiple devices. You can override it via `run_tasks.sh` KEY=VALUE pairs (e.g. `BUILD_FOLDER=gpu2080`). This creates separate run folders per device (e.g. `gpu2080/`, `gpu4090/`) so results stay isolated. The plot task aggregates across all `*-run*` folders, so plots can include all devices.
+Build tasks use `RUN_SPEC=$BUILD_FOLDER`, which gives them a single named run folder. The `BUILD_FOLDER` variable enables running tasks independently on multiple devices. You can override it via `run_tasks.sh` KEY=VALUE pairs (e.g. `BUILD_FOLDER=gpu2080`). This creates separate run folders per device (e.g. `gpu2080/`, `gpu4090/`) so results stay isolated. Overrides are positional: each `KEY=VALUE` applies to all following task specs. The plot task aggregates across all `*-run*` folders, so plots can include all devices.
 
 ### Debug build (DISABLED)
 

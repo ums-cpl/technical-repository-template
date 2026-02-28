@@ -106,6 +106,12 @@ parse_args() {
         ;;
       *)
         TASK_SPECS+=("$1")
+        # Snapshot current overrides for this task spec (tab-separated; order preserved for later "last per key")
+        if [[ ${#ENV_OVERRIDES[@]} -gt 0 ]]; then
+          TASK_SPEC_OVERRIDES+=("$(IFS=$'\t'; echo "${ENV_OVERRIDES[*]}")")
+        else
+          TASK_SPEC_OVERRIDES+=("")
+        fi
         shift
         ;;
     esac

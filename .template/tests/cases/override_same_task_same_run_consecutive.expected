@@ -1,0 +1,11 @@
+# Same task+run, two different override contexts → consecutive stages
+FOO=1 tasks/build/containers/gcc FOO=2 tasks/build/containers/gcc
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/gcc	FOO=1
+JOB	1
+DEPENDS	0
+0	assets	tasks/build/containers/gcc	FOO=2

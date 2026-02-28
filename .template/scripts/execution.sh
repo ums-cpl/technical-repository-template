@@ -217,7 +217,7 @@ RUNNER_SCRIPT
 }
 
 # Creates a single manifest file with multiple jobs, each with tasks and dependencies.
-# Format: header (SKIP_VERIFY_DEF, env overrides, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH.
+# Format: header (SKIP_VERIFY_DEF, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH[<TAB>KEY=VALUE...].
 # When RUN_TASKS_PRECOMPUTED_TASK_STAGE and RUN_TASKS_PRECOMPUTED_MAX_STAGE are set (by main for direct
 # execution), uses them instead of calling compute_stages. Avoids duplicate stage computation.
 create_manifest() {
@@ -252,35 +252,39 @@ create_manifest() {
 
   print_manifest_content() {
     echo "SKIP_VERIFY_DEF=$SKIP_VERIFY_DEF"
-    for ov in "${ENV_OVERRIDES[@]}"; do
-      echo "$ov"
-    done
     echo "---"
-    local stage job_id task_dir run_name i prev_job_id=-1
+    local stage job_id task_dir run_name i idx prev_job_id=-1
+    local -a pair_indices=()
     for stage in $(seq 0 "$max_stage"); do
-      # Build (task, run) pairs for this stage from _task_run_pairs; when SKIP_SUCCEEDED, exclude already-succeeded runs
-      local pairs=()
-      local pair
-      for pair in "${_task_run_pairs[@]}"; do
+      pair_indices=()
+      for ((idx=0; idx<${#_task_run_pairs[@]}; idx++)); do
+        local pair="${_task_run_pairs[$idx]}"
+        local occ_key="${TASK_RUN_PAIR_OCC_KEYS[$idx]:-}"
         task_dir="${pair%%	*}"
         run_name="${pair#*	}"
-        [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+        [[ "${task_stage[$occ_key]:--1}" != "$stage" ]] && continue
         if [[ "$SKIP_SUCCEEDED" != true ]] || ! is_task_succeeded "$task_dir" "$run_name"; then
-          pairs+=("$task_dir	$run_name")
+          pair_indices+=("$idx")
         fi
       done
-      [[ ${#pairs[@]} -eq 0 ]] && continue
+      [[ ${#pair_indices[@]} -eq 0 ]] && continue
       job_id=$((prev_job_id + 1))
       echo "JOB	$job_id"
       local dep_list=""
       [[ $prev_job_id -ge 0 ]] && dep_list="$prev_job_id"
       echo "DEPENDS	$dep_list"
       i=0
-      for pair in "${pairs[@]}"; do
+      for idx in "${pair_indices[@]}"; do
+        local pair="${_task_run_pairs[$idx]}"
         task_dir="${pair%%	*}"
         run_name="${pair#*	}"
         relative_path="${task_dir#$REPOSITORY_ROOT/}"
-        printf '%d\t%s\t%s\n' "$i" "$run_name" "$relative_path"
+        local overrides="${TASK_RUN_PAIR_OVERRIDES[$idx]:-}"
+        if [[ -n "$overrides" ]]; then
+          printf '%d\t%s\t%s\t%s\n' "$i" "$run_name" "$relative_path" "$overrides"
+        else
+          printf '%d\t%s\t%s\n' "$i" "$run_name" "$relative_path"
+        fi
         i=$((i + 1))
       done
       prev_job_id=$job_id
@@ -343,18 +347,15 @@ run_array_task() {
   local task_id="$3"
   local line task_dir
 
-  # Parse header: SKIP_VERIFY_DEF, then KEY=VALUE lines until ---
-  ENV_OVERRIDES=()
+  # Parse header: SKIP_VERIFY_DEF only until --- (per-task overrides are in task lines)
   while IFS= read -r line; do
     [[ "$line" == "---" ]] && break
     if [[ "$line" == SKIP_VERIFY_DEF=* ]]; then
       SKIP_VERIFY_DEF="${line#SKIP_VERIFY_DEF=}"
-    elif [[ "$line" == *=* ]]; then
-      ENV_OVERRIDES+=("$line")
     fi
   done < "$manifest"
 
-  # Find job block for job_id, then task at task_id. Format: JOB N, DEPENDS ..., INDEX RUN PATH
+  # Find job block for job_id, then task at task_id. Format: INDEX RUN PATH [TAB KEY=VALUE...]
   local manifest_line run_name
   manifest_line=$(awk -F'\t' -v jid="$job_id" -v tid="$task_id" '
     /^JOB\t/ { cur=$2; next }
@@ -364,9 +365,16 @@ run_array_task() {
     echo "Error: No task found for job $job_id index $task_id in manifest $manifest" >&2
     return 1
   fi
-  run_name=$(echo "$manifest_line" | awk -F'\t' '{print $2}')
-  task_dir=$(echo "$manifest_line" | awk -F'\t' '{print $3}')
+  ENV_OVERRIDES=()
+  local -a fields=()
+  IFS=$'\t' read -ra fields <<< "$manifest_line"
+  run_name="${fields[1]}"
+  task_dir="${fields[2]}"
   [[ "$task_dir" != /* ]] && task_dir="$REPOSITORY_ROOT/$task_dir"
+  local f
+  for ((f=3; f<${#fields[@]}; f++)); do
+    [[ -n "${fields[$f]}" ]] && [[ "${fields[$f]}" == *=* ]] && ENV_OVERRIDES+=("${fields[$f]}")
+  done
 
   run_task "$task_dir" "$run_name"
 }

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Stage computation and dependency verification.
 
-# Validate a single dependency (task_dir depends on dep_task_dir with dep_run_spec).
+# Validate a single dependency (dependent occ_key depends on dep_task_dir with dep_run_spec).
 # Updates _missing_deps, _missing_count_ref, and _dep_checks. Used by compute_stages.
+# _dep_checks is keyed by occ_key (the dependent).
 validate_dependency() {
-  local task_dir="$1"
+  local occ_key="$1"
   local dep_task_dir="$2"
   local dep_run_spec="$3"
   local -n _inv_pair_set=$4
@@ -13,6 +14,7 @@ validate_dependency() {
   local -n _missing_deps=$7
   local -n _missing_count_ref=$8
   local -n _dep_checks=$9
+  local task_dir="${occ_key%	OCC:*}"
 
   if [[ -z "$dep_run_spec" ]]; then
     local -a disk_runs=()
@@ -54,7 +56,7 @@ validate_dependency() {
         _missing_count_ref=$((_missing_count_ref + 1))
       fi
     fi
-    _dep_checks["$task_dir"]+="ALL	$dep_task_dir"$'\n'
+    _dep_checks["$occ_key"]+="ALL	$dep_task_dir"$'\n'
 
   elif [[ "$dep_run_spec" == *"*"* || "$dep_run_spec" == *"?"* ]]; then
     local -a matched_runs=()
@@ -86,31 +88,28 @@ validate_dependency() {
           _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
           _missing_count_ref=$((_missing_count_ref + 1))
         fi
-        _dep_checks["$task_dir"]+="RUN	$dep_task_dir	$rn"$'\n'
+        _dep_checks["$occ_key"]+="RUN	$dep_task_dir	$rn"$'\n'
       done
     fi
 
   else
     local -a dep_runs=()
     expand_run_spec "$dep_run_spec" dep_runs
-      for rn in "${dep_runs[@]}"; do
+    for rn in "${dep_runs[@]}"; do
       if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && { [[ "$INCLUDE_DEPS" == true ]] || [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; }; then
         local rel_task="${task_dir#$TASKS/}"
         local rel_dep="${dep_task_dir#$TASKS/}"
         _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
         _missing_count_ref=$((_missing_count_ref + 1))
       fi
-      _dep_checks["$task_dir"]+="RUN	$dep_task_dir	$rn"$'\n'
+      _dep_checks["$occ_key"]+="RUN	$dep_task_dir	$rn"$'\n'
     done
   fi
 }
 
-# Compute stages from task dependencies. Populates _task_stage[path]=stage_id.
-# Sets _max_stage to max stage id (stages are 0.._max_stage).
-# Populates _task_dep_checks with per-task dependency checks for inter-stage verification.
-# Each DEPENDENCIES entry may include a run suffix (e.g. :local, :run:1:10, :run*).
-# A dependency is resolved if it is in the current invocation or has .run_success on disk.
-# For task-only deps (no run spec): all runs on disk must have .run_success, and at least one run must exist (disk or invocation).
+# Compute stages from task dependencies. Populates _task_stage[occ_key]=stage_id.
+# _tasks is TASK_OCC_KEYS (occurrence keys). Dependency on a task resolves to its last occurrence.
+# Implicit sequential deps: same (task_dir, run_name) in consecutive pairs -> later stage.
 compute_stages() {
   local -n _tasks=$1
   local -n _task_run_pairs_ref=$2
@@ -120,37 +119,65 @@ compute_stages() {
   _task_stage=()
   _task_dep_checks=()
 
-  # Build invocation lookup structures from TASK_RUN_PAIRS
+  # Build invocation lookup: pair set, task set, and task_dir -> last occ_key (for dep resolution)
   declare -A invocation_pair_set
   declare -A invocation_task_set
-  local pair td rn
-  for pair in "${_task_run_pairs_ref[@]}"; do
+  declare -A task_dir_to_last_occ
+  local i pair td rn occ_key
+  for ((i=0; i<${#_task_run_pairs_ref[@]}; i++)); do
+    pair="${_task_run_pairs_ref[$i]}"
+    occ_key="${TASK_RUN_PAIR_OCC_KEYS[$i]:-}"
     td="${pair%%	*}"
     rn="${pair#*	}"
     invocation_pair_set["$td	$rn"]=1
     invocation_task_set["$td"]=1
+    task_dir_to_last_occ["$td"]="$occ_key"
   done
 
-  # Build dependency map: task -> list of dep tasks (for DAG, deduplicated)
-  # Validate that each dependency is resolved (in invocation or .run_success on disk)
-  # Dependencies are per-run: iterate over task-run pairs, aggregate at the task level.
   declare -A deps
   declare -A dep_edges_added
   declare -A missing_deps
   local missing_count=0
-  local task_dir dep_entry
+  local dep_entry
 
-  # Initialize deps for all tasks
-  for task_dir in "${_tasks[@]}"; do
-    deps["$task_dir"]=""
+  # Initialize deps for all occurrence keys (newline-separated to preserve occ_key with tab)
+  for occ_key in "${_tasks[@]}"; do
+    deps["$occ_key"]=""
   done
 
-  # Collect deps per task-run pair
-  for pair in "${_task_run_pairs_ref[@]}"; do
-    task_dir="${pair%%	*}"
+  # Implicit sequential deps: same (task_dir, run_name) in consecutive pairs
+  declare -A prev_occ_by_pair
+  for ((i=0; i<${#_task_run_pairs_ref[@]}; i++)); do
+    pair="${_task_run_pairs_ref[$i]}"
+    occ_key="${TASK_RUN_PAIR_OCC_KEYS[$i]:-}"
+    td="${pair%%	*}"
+    rn="${pair#*	}"
+    local pair_key="$td	$rn"
+    if [[ -n "${prev_occ_by_pair[$pair_key]+x}" ]]; then
+      local prev_occ="${prev_occ_by_pair[$pair_key]}"
+      local edge_key="$prev_occ	$occ_key"
+      if [[ -z "${dep_edges_added["$edge_key"]+x}" ]]; then
+        deps["$occ_key"]+="${deps["$occ_key"]:+$'\n'}$prev_occ"
+        dep_edges_added["$edge_key"]=1
+      fi
+    fi
+    prev_occ_by_pair["$pair_key"]="$occ_key"
+  done
+
+  # Collect explicit deps per pair; dependency on task X -> edge to last occurrence of X
+  # Use this pair's overrides when resolving deps so BUILD_FOLDER etc. are correct
+  for ((i=0; i<${#_task_run_pairs_ref[@]}; i++)); do
+    pair="${_task_run_pairs_ref[$i]}"
+    occ_key="${TASK_RUN_PAIR_OCC_KEYS[$i]:-}"
+    td="${pair%%	*}"
     local run_name="${pair#*	}"
+    ENV_OVERRIDES=()
+    local ov_tsv="${TASK_RUN_PAIR_OVERRIDES[$i]:-}"
+    if [[ -n "$ov_tsv" ]]; then
+      IFS=$'\t' read -ra ENV_OVERRIDES <<< "$ov_tsv"
+    fi
     local dep_entries=()
-    get_task_dependencies "$task_dir" "$run_name" dep_entries
+    get_task_dependencies "$td" "$run_name" dep_entries
     for dep_entry in "${dep_entries[@]}"; do
       local parsed
       set -f
@@ -164,16 +191,16 @@ compute_stages() {
       done < <(resolve_arg "$dep_task_path" "$REPOSITORY_ROOT")
 
       for r in "${resolved[@]}"; do
-        # Add task-level DAG edge (deduplicated, only for dep tasks in the invocation)
-        local edge_key="$task_dir	$r"
-        if [[ -z "${dep_edges_added["$edge_key"]+x}" ]] && [[ -n "${invocation_task_set["$r"]+x}" ]]; then
-          deps["$task_dir"]+=" $r"
-          dep_edges_added["$edge_key"]=1
-        fi
-
-        validate_dependency "$task_dir" "$r" "$dep_run_spec" \
+        validate_dependency "$occ_key" "$r" "$dep_run_spec" \
           invocation_pair_set invocation_task_set _task_run_pairs_ref \
           missing_deps missing_count _task_dep_checks
+        [[ -z "${invocation_task_set["$r"]+x}" ]] && continue
+        local dep_occ="${task_dir_to_last_occ["$r"]}"
+        local edge_key="$occ_key	$dep_occ"
+        if [[ -z "${dep_edges_added["$edge_key"]+x}" ]] && [[ "$occ_key" != "$dep_occ" ]]; then
+          deps["$occ_key"]+="${deps["$occ_key"]:+$'\n'}$dep_occ"
+          dep_edges_added["$edge_key"]=1
+        fi
       done
     done
   done
@@ -184,7 +211,6 @@ compute_stages() {
       for dep in "${!missing_deps[@]}"; do
         local spec
         if [[ "$dep" == *" (no matching run folders on disk)" ]]; then
-          # Wildcard run spec with no runs on disk: use task path only so task's RUN_SPEC is used
           spec="${dep%%:*}"
         else
           spec="${dep% (no matching run folders on disk)}"
@@ -207,50 +233,53 @@ compute_stages() {
     exit 1
   fi
 
-  # Topological sort with cycle detection (Kahn's algorithm)
+  # Topological sort (Kahn's algorithm) on occurrence keys (deps are newline-separated)
   declare -A in_degree
-  for task_dir in "${_tasks[@]}"; do
-    in_degree["$task_dir"]=0
+  for occ_key in "${_tasks[@]}"; do
+    in_degree["$occ_key"]=0
   done
-  for task_dir in "${_tasks[@]}"; do
-    for dep in ${deps["$task_dir"]}; do
-      [[ -n "$dep" ]] && in_degree["$task_dir"]=$((${in_degree["$task_dir"]} + 1))
-    done
+  for occ_key in "${_tasks[@]}"; do
+    local dep
+    while IFS= read -r dep; do
+      [[ -n "$dep" ]] && in_degree["$occ_key"]=$((${in_degree["$occ_key"]} + 1))
+    done <<< "${deps["$occ_key"]}"
   done
 
   local stage=0
   local remaining=("${_tasks[@]}")
   while [[ ${#remaining[@]} -gt 0 ]]; do
     local ready=()
-    for task_dir in "${remaining[@]}"; do
-      if [[ ${in_degree["$task_dir"]} -eq 0 ]]; then
-        ready+=("$task_dir")
+    for occ_key in "${remaining[@]}"; do
+      if [[ ${in_degree["$occ_key"]} -eq 0 ]]; then
+        ready+=("$occ_key")
       fi
     done
     if [[ ${#ready[@]} -eq 0 ]]; then
       echo "Error: Circular dependency detected among tasks." >&2
       exit 1
     fi
-    for task_dir in "${ready[@]}"; do
-      _task_stage["$task_dir"]=$stage
+    for occ_key in "${ready[@]}"; do
+      _task_stage["$occ_key"]=$stage
     done
-    for task_dir in "${remaining[@]}"; do
-      for dep in ${deps["$task_dir"]}; do
-        for ready_task in "${ready[@]}"; do
-          if [[ "$dep" == "$ready_task" ]]; then
-            in_degree["$task_dir"]=$((${in_degree["$task_dir"]} - 1))
+    for occ_key in "${remaining[@]}"; do
+      local dep
+      while IFS= read -r dep; do
+        [[ -z "$dep" ]] && continue
+        for ready_occ in "${ready[@]}"; do
+          if [[ "$dep" == "$ready_occ" ]]; then
+            in_degree["$occ_key"]=$((${in_degree["$occ_key"]} - 1))
             break
           fi
         done
-      done
+      done <<< "${deps["$occ_key"]}"
     done
     local new_remaining=()
-    for task_dir in "${remaining[@]}"; do
+    for occ_key in "${remaining[@]}"; do
       local is_ready=false
       for r in "${ready[@]}"; do
-        [[ "$task_dir" == "$r" ]] && { is_ready=true; break; }
+        [[ "$occ_key" == "$r" ]] && { is_ready=true; break; }
       done
-      [[ "$is_ready" != true ]] && new_remaining+=("$task_dir")
+      [[ "$is_ready" != true ]] && new_remaining+=("$occ_key")
     done
     remaining=("${new_remaining[@]}")
     stage=$((stage + 1))
@@ -259,7 +288,7 @@ compute_stages() {
 }
 
 # Verify that all dependency runs for tasks in a given stage have .run_success files.
-# Aborts the pipeline if any dependency is unsatisfied.
+# _csd_tasks is TASK_OCC_KEYS; _csd_task_stage and _csd_dep_checks are keyed by occ_key.
 check_stage_deps() {
   local stage=$1
   local -n _csd_tasks=$2
@@ -268,10 +297,10 @@ check_stage_deps() {
   local -n _csd_task_run_pairs=$5
 
   local -a unsatisfied=()
-  local task_dir
-  for task_dir in "${_csd_tasks[@]}"; do
-    [[ "${_csd_task_stage[$task_dir]:--1}" != "$stage" ]] && continue
-    local checks="${_csd_dep_checks[$task_dir]:-}"
+  local occ_key
+  for occ_key in "${_csd_tasks[@]}"; do
+    [[ "${_csd_task_stage[$occ_key]:--1}" != "$stage" ]] && continue
+    local checks="${_csd_dep_checks[$occ_key]:-}"
     [[ -z "$checks" ]] && continue
     while IFS= read -r check; do
       [[ -z "$check" ]] && continue
@@ -302,12 +331,14 @@ check_stage_deps() {
 
         if [[ ${#union_runs[@]} -eq 0 ]]; then
           local rel_dep="${dep_dir#$TASKS/}"
+          local task_dir="${occ_key%	OCC:*}"
           local rel_task="${task_dir#$TASKS/}"
           unsatisfied+=("tasks/$rel_dep (at least one run required) required by tasks/$rel_task")
         else
           for rn in "${!union_runs[@]}"; do
             if [[ ! -f "$dep_dir/$rn/.run_success" ]]; then
               local rel_dep="${dep_dir#$TASKS/}"
+              local task_dir="${occ_key%	OCC:*}"
               local rel_task="${task_dir#$TASKS/}"
               unsatisfied+=("tasks/$rel_dep/$rn required by tasks/$rel_task")
             fi
@@ -318,6 +349,7 @@ check_stage_deps() {
         dep_run="${rest#*	}"
         if [[ ! -f "$dep_dir/$dep_run/.run_success" ]]; then
           local rel_dep="${dep_dir#$TASKS/}"
+          local task_dir="${occ_key%	OCC:*}"
           local rel_task="${task_dir#$TASKS/}"
           unsatisfied+=("tasks/$rel_dep/$dep_run required by tasks/$rel_task")
         fi

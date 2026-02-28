@@ -13,6 +13,7 @@ main() {
   # When no tasks specified, run all tasks under tasks/
   if [[ ${#TASK_SPECS[@]} -eq 0 ]]; then
     TASK_SPECS=("tasks")
+    TASK_SPEC_OVERRIDES=("")
   fi
 
   build_task_run_pairs
@@ -55,7 +56,7 @@ main() {
     local max_stage=0
     while true; do
       local cs_status=0
-      compute_stages TASKS_UNIQUE TASK_RUN_PAIRS task_stage max_stage task_dep_checks || cs_status=$?
+      compute_stages TASK_OCC_KEYS TASK_RUN_PAIRS task_stage max_stage task_dep_checks || cs_status=$?
       if [[ $cs_status -eq 0 ]]; then break; fi
       if [[ "$INCLUDE_DEPS" != true ]] || [[ ${#RUN_TASKS_MISSING_SPECS[@]} -eq 0 ]]; then
         exit 1
@@ -69,6 +70,7 @@ main() {
         done
         if [[ "$found" != true ]]; then
           TASK_SPECS+=("$spec")
+          TASK_SPEC_OVERRIDES+=("")
           added=1
         fi
       done
@@ -94,7 +96,7 @@ main() {
 
     # Dry run: print manifest to stdout without writing to disk, then exit
     if [[ "$DRY_RUN" == true ]]; then
-      create_manifest TASK_RUN_PAIRS TASKS_UNIQUE
+      create_manifest TASK_RUN_PAIRS TASK_OCC_KEYS
       exit 0
     fi
 
@@ -107,7 +109,7 @@ main() {
         echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
         exit 1
       fi
-      manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
+      manifest_path=$(create_manifest TASK_RUN_PAIRS TASK_OCC_KEYS)
       if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
         echo "All tasks already succeeded, nothing to submit."
         exit 0
@@ -122,7 +124,7 @@ main() {
 
     # Direct execution: create manifest (for audit), run stages sequentially
     local manifest_path
-    manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
+    manifest_path=$(create_manifest TASK_RUN_PAIRS TASK_OCC_KEYS)
 
     local total_ops=${#TASK_RUN_PAIRS[@]}
     local current=0
@@ -134,13 +136,20 @@ main() {
     for stage in $(seq 0 "$max_stage"); do
       echo ""
       echo "--- Stage $stage ---"
-      check_stage_deps "$stage" TASKS_UNIQUE task_stage task_dep_checks TASK_RUN_PAIRS
-      local pair
-      for pair in "${TASK_RUN_PAIRS[@]}"; do
+      check_stage_deps "$stage" TASK_OCC_KEYS task_stage task_dep_checks TASK_RUN_PAIRS
+      local idx
+      for ((idx=0; idx<${#TASK_RUN_PAIRS[@]}; idx++)); do
+        local pair="${TASK_RUN_PAIRS[$idx]}"
+        local occ_key="${TASK_RUN_PAIR_OCC_KEYS[$idx]:-}"
         local task_dir="${pair%%	*}"
         local run_name="${pair#*	}"
-        [[ "${task_stage[$task_dir]:--1}" != "$stage" ]] && continue
+        [[ "${task_stage[$occ_key]:--1}" != "$stage" ]] && continue
         current=$((current + 1))
+        ENV_OVERRIDES=()
+        local ov_tsv="${TASK_RUN_PAIR_OVERRIDES[$idx]:-}"
+        if [[ -n "$ov_tsv" ]]; then
+          IFS=$'\t' read -ra ENV_OVERRIDES <<< "$ov_tsv"
+        fi
         local rel_path="${task_dir#$TASKS/}"
         printf "[%0${#total_ops}d/%0${#total_ops}d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
         if [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then

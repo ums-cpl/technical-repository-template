@@ -12,7 +12,7 @@ Used to run tasks.
 ./run_tasks.sh [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
 ```
 
-**KEY=VALUE** pairs are environment overrides. They are applied once initially, then after each sourced file (`task_meta.sh`, `run_env.sh`, `run_deps.sh`), pinning overridden values so every file in the chain sees them.
+**KEY=VALUE** pairs are environment overrides. They are **positional and accumulate**: each `KEY=VALUE` applies from that point onward to all subsequent task specs. For example, `FOO=1 task1 FOO=2 task2` gives `task1` the set `{FOO=1}` and `task2` the set `{FOO=1, FOO=2}` (later values win). Overrides are applied after each sourced file (`task_meta.sh`, `run_env.sh`, `run_deps.sh`) so every file in the chain sees them. If the same task and run are specified twice with different override context (e.g. `FOO=1 tasks/build/gcc FOO=2 tasks/build/gcc`), they run in consecutive stages and the second occurrence overwrites the first in the same run folder.
 
 **TASK** can be:
 
@@ -141,7 +141,7 @@ Several pre-defined workload manager scripts are provided in the `workload_manag
 
 where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task index within that job.
 
-**Manifest format:** Header (SKIP_VERIFY_DEF, env overrides, `---`), then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and `INDEX\tRUN\tPATH` lines per task. PATH is relative to REPOSITORY_ROOT (e.g. `tasks/...`).
+**Manifest format:** Header (SKIP_VERIFY_DEF, `---`; no global env overrides). Then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and task lines `INDEX\tRUN\tPATH[\tKEY=VALUE...]`. PATH is relative to REPOSITORY_ROOT (e.g. `tasks/...`). Per-task overrides appear as extra tab-separated `KEY=VALUE` fields on each task line; tasks with no overrides have no extra fields.
 
 ## Test runner
 

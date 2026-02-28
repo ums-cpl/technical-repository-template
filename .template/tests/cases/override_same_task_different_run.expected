@@ -1,0 +1,9 @@
+# Same task, two different override contexts resulting in different runs → one stage
+BUILD_FOLDER=cpu tasks/build/containers/gcc BUILD_FOLDER=gpu tasks/build/containers/gcc
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	cpu	tasks/build/containers/gcc	BUILD_FOLDER=cpu
+1	gpu	tasks/build/containers/gcc	BUILD_FOLDER=gpu

@@ -3,7 +3,11 @@
 # are set by the root script before sourcing.
 
 declare -a TASK_SPECS=()
+declare -a TASK_SPEC_OVERRIDES=()
 declare -a TASK_RUN_PAIRS=()
+declare -a TASK_RUN_PAIR_OVERRIDES=()
+declare -a TASK_RUN_PAIR_OCC_KEYS=()
+declare -a TASK_OCC_KEYS=()
 declare -a TASKS_UNIQUE=()
 DRY_RUN=false
 CLEAN=false
