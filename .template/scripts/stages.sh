@@ -39,11 +39,20 @@ validate_dependency() {
     local resolved_ok=false
     [[ "$all_disk_ok" == true ]] && [[ "$has_at_least_one" == true ]] && resolved_ok=true
 
-    if [[ "$resolved_ok" != true ]]; then
-      local rel_task="${task_dir#$TASKS/}"
-      local rel_dep="${dep_task_dir#$TASKS/}"
-      _missing_deps["tasks/$rel_dep"]="${_missing_deps["tasks/$rel_dep"]:+${_missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
-      _missing_count_ref=$((_missing_count_ref + 1))
+    if [[ "$INCLUDE_DEPS" == true ]]; then
+      if [[ -z "${_inv_task_set["$dep_task_dir"]+x}" ]]; then
+        local rel_task="${task_dir#$TASKS/}"
+        local rel_dep="${dep_task_dir#$TASKS/}"
+        _missing_deps["tasks/$rel_dep"]="${_missing_deps["tasks/$rel_dep"]:+${_missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
+        _missing_count_ref=$((_missing_count_ref + 1))
+      fi
+    else
+      if [[ "$resolved_ok" != true ]]; then
+        local rel_task="${task_dir#$TASKS/}"
+        local rel_dep="${dep_task_dir#$TASKS/}"
+        _missing_deps["tasks/$rel_dep"]="${_missing_deps["tasks/$rel_dep"]:+${_missing_deps["tasks/$rel_dep"]}, }tasks/$rel_task"
+        _missing_count_ref=$((_missing_count_ref + 1))
+      fi
     fi
     _dep_checks["$task_dir"]+="ALL	$dep_task_dir"$'\n'
 
@@ -71,7 +80,7 @@ validate_dependency() {
       _missing_count_ref=$((_missing_count_ref + 1))
     else
       for rn in "${matched_runs[@]}"; do
-        if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; then
+        if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && { [[ "$INCLUDE_DEPS" == true ]] || [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; }; then
           local rel_task="${task_dir#$TASKS/}"
           local rel_dep="${dep_task_dir#$TASKS/}"
           _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
@@ -84,8 +93,8 @@ validate_dependency() {
   else
     local -a dep_runs=()
     expand_run_spec "$dep_run_spec" dep_runs
-    for rn in "${dep_runs[@]}"; do
-      if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; then
+      for rn in "${dep_runs[@]}"; do
+      if [[ -z "${_inv_pair_set["$dep_task_dir	$rn"]+x}" ]] && { [[ "$INCLUDE_DEPS" == true ]] || [[ ! -f "$dep_task_dir/$rn/.run_success" ]]; }; then
         local rel_task="${task_dir#$TASKS/}"
         local rel_dep="${dep_task_dir#$TASKS/}"
         _missing_deps["tasks/$rel_dep:$rn"]="${_missing_deps["tasks/$rel_dep:$rn"]:+${_missing_deps["tasks/$rel_dep:$rn"]}, }tasks/$rel_task"
