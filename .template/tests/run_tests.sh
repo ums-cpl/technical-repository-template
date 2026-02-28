@@ -65,14 +65,18 @@ collect_case_files() {
 
 run_one_case() {
   local case_file="$1"
-  local args_line expected_file actual_file
-  args_line=$(sed -n '1p' "$case_file")
-  if [[ "$(sed -n '2p' "$case_file")" != "---" ]]; then
-    echo -e "${RED}FAIL${RESET} $case_file (invalid: line 2 must be ---)"
+  local args_line expected_file actual_file stripped_file
+  stripped_file="${TMPDIR:-/tmp}/run_tests_stripped_$$"
+  grep -v '^[[:space:]]*#' "$case_file" > "$stripped_file"
+  args_line=$(sed -n '1p' "$stripped_file")
+  if [[ "$(sed -n '2p' "$stripped_file")" != "---" ]]; then
+    rm -f "$stripped_file"
+    echo -e "${RED}FAIL${RESET} $case_file (invalid: after skipping comments, second line must be ---)"
     return 1
   fi
   expected_file="${TMPDIR:-/tmp}/run_tests_expected_$$"
-  tail -n +3 "$case_file" > "$expected_file"
+  tail -n +3 "$stripped_file" > "$expected_file"
+  rm -f "$stripped_file"
   actual_file="${TMPDIR:-/tmp}/run_tests_actual_$$"
   if ! ( set -- $args_line; "$REPOSITORY_ROOT/run_tasks.sh" --dry-run "$@" ) > "$actual_file" 2>/dev/null; then
     rm -f "$expected_file" "$actual_file"
