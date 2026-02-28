@@ -94,6 +94,12 @@ main() {
     RUN_TASKS_PRECOMPUTED_MAX_STAGE=$max_stage
     local total=${#TASKS_UNIQUE[@]}
 
+    # Dry run: print manifest to stdout without writing to disk, then exit
+    if [[ "$DRY_RUN" == true ]]; then
+      create_manifest TASK_RUN_PAIRS TASKS_UNIQUE
+      exit 0
+    fi
+
     # Workload manager path: create manifest, invoke workload manager (single arg)
     if [[ -n "$WORKLOAD_MANAGER_SCRIPT" ]]; then
       local wm_script manifest_path
@@ -104,10 +110,6 @@ main() {
         exit 1
       fi
       manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
-      if [[ "$DRY_RUN" == true ]]; then
-        cat "$manifest_path"
-        exit 0
-      fi
       if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
         echo "All tasks already succeeded, nothing to submit."
         exit 0
@@ -123,10 +125,6 @@ main() {
     # Direct execution: create manifest (for audit), run stages sequentially
     local manifest_path
     manifest_path=$(create_manifest TASK_RUN_PAIRS TASKS_UNIQUE)
-    if [[ "$DRY_RUN" == true ]]; then
-      cat "$manifest_path"
-      exit 0
-    fi
 
     local total_ops=${#TASK_RUN_PAIRS[@]}
     local current=0

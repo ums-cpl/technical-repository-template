@@ -226,10 +226,8 @@ create_manifest() {
     done
     inv_dir="$RUN_TASKS_OUTPUT_ROOT/${job_safe}_${n}"
   fi
-  mkdir -p "$inv_dir"
-  manifest_path="$inv_dir/manifest"
 
-  {
+  print_manifest_content() {
     echo "SKIP_VERIFY_DEF=$SKIP_VERIFY_DEF"
     for ov in "${ENV_OVERRIDES[@]}"; do
       echo "$ov"
@@ -264,7 +262,16 @@ create_manifest() {
       done
       prev_job_id=$job_id
     done
-  } > "$manifest_path"
+  }
+
+  if [[ "${DRY_RUN:-false}" == true ]]; then
+    print_manifest_content
+    return 0
+  fi
+
+  mkdir -p "$inv_dir"
+  manifest_path="$inv_dir/manifest"
+  print_manifest_content > "$manifest_path"
 
   # Script to print exit states from task run folders
   cat > "$inv_dir/show_exit_states.sh" << 'EXIT_SCRIPT'
