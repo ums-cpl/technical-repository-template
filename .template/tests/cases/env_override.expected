@@ -1,6 +1,6 @@
 # KEY=VALUE env overrides appear in manifest
 FOO=bar tasks/build/containers/gcc
----
+EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 FOO=bar
 ---

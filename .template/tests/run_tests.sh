@@ -65,30 +65,50 @@ collect_case_files() {
 
 run_one_case() {
   local case_file="$1"
-  local args_line expected_file actual_file stripped_file
+  local args_line expect_line expected_file actual_file stripped_file expect_fail=0
   stripped_file="${TMPDIR:-/tmp}/run_tests_stripped_$$"
   grep -v '^[[:space:]]*#' "$case_file" > "$stripped_file"
   args_line=$(sed -n '1p' "$stripped_file")
-  if [[ "$(sed -n '2p' "$stripped_file")" != "---" ]]; then
+  expect_line=$(sed -n '2p' "$stripped_file")
+  expect_line="${expect_line#"${expect_line%%[![:space:]]*}"}"
+  expect_line="${expect_line%"${expect_line##*[![:space:]]}"}"
+  if [[ "$expect_line" == "EXPECT_FAILURE:" ]]; then
+    expect_fail=1
+  elif [[ "$expect_line" != "EXPECT_SUCCESS:" ]]; then
     rm -f "$stripped_file"
-    echo -e "${RED}FAIL${RESET} $case_file (invalid: after skipping comments, second line must be ---)"
+    echo -e "${RED}FAIL${RESET} $case_file (invalid: after skipping comments, second line must be EXPECT_SUCCESS: or EXPECT_FAILURE:)"
     return 1
   fi
   expected_file="${TMPDIR:-/tmp}/run_tests_expected_$$"
   tail -n +3 "$stripped_file" > "$expected_file"
   rm -f "$stripped_file"
   actual_file="${TMPDIR:-/tmp}/run_tests_actual_$$"
-  if ! ( set -- $args_line; "$REPOSITORY_ROOT/run_tasks.sh" --dry-run "$@" ) > "$actual_file" 2>/dev/null; then
-    rm -f "$expected_file" "$actual_file"
-    echo -e "${RED}FAIL${RESET} $case_file (run_tasks.sh failed)"
-    return 1
-  fi
-  if ! diff -q "$expected_file" "$actual_file" >/dev/null 2>&1; then
-    actual_saved="${case_file%.expected}.actual"
-    { echo "$args_line"; echo "---"; cat "$actual_file"; } > "$actual_saved"
-    rm -f "$expected_file" "$actual_file"
-    echo -e "${RED}FAIL${RESET} $case_file (manifest diff; actual saved to $actual_saved)"
-    return 1
+  if [[ $expect_fail -eq 0 ]]; then
+    if ! ( set -- $args_line; "$REPOSITORY_ROOT/run_tasks.sh" --dry-run "$@" ) > "$actual_file" 2>/dev/null; then
+      rm -f "$expected_file" "$actual_file"
+      echo -e "${RED}FAIL${RESET} $case_file (run_tasks.sh failed)"
+      return 1
+    fi
+    if ! diff -q "$expected_file" "$actual_file" >/dev/null 2>&1; then
+      actual_saved="${case_file%.expected}.actual"
+      { echo "$args_line"; echo "$expect_line"; cat "$actual_file"; } > "$actual_saved"
+      rm -f "$expected_file" "$actual_file"
+      echo -e "${RED}FAIL${RESET} $case_file (manifest diff; actual saved to $actual_saved)"
+      return 1
+    fi
+  else
+    if ( set -- $args_line; "$REPOSITORY_ROOT/run_tasks.sh" --dry-run "$@" ) >/dev/null 2> "$actual_file"; then
+      rm -f "$expected_file" "$actual_file"
+      echo -e "${RED}FAIL${RESET} $case_file (run_tasks.sh succeeded but failure was expected)"
+      return 1
+    fi
+    if [[ -s "$expected_file" ]] && ! diff -q "$expected_file" "$actual_file" >/dev/null 2>&1; then
+      actual_saved="${case_file%.expected}.actual"
+      { echo "$args_line"; echo "$expect_line"; cat "$actual_file"; } > "$actual_saved"
+      rm -f "$expected_file" "$actual_file"
+      echo -e "${RED}FAIL${RESET} $case_file (stderr diff; actual saved to $actual_saved)"
+      return 1
+    fi
   fi
   rm -f "$expected_file" "$actual_file"
   echo -e "${GREEN}PASS${RESET} $case_file"

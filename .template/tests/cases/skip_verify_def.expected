@@ -1,6 +1,6 @@
 # --skip-verify-def sets SKIP_VERIFY_DEF in manifest
 --skip-verify-def tasks/build/containers/gcc
----
+EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=true
 ---
 JOB	0

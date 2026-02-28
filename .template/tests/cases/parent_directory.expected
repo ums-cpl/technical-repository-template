@@ -1,6 +1,6 @@
 # Parent directory: resolve_arg finds all descendant tasks; stages from deps
 tasks/build
----
+EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 ---
 JOB	0

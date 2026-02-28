@@ -1,6 +1,6 @@
 # --run-disabled: include TASK_DISABLED task (e.g. build/debug)
 --run-disabled --include-deps tasks/build/debug
----
+EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 ---
 JOB	0

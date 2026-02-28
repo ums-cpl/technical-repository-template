@@ -1,6 +1,6 @@
 # Multiple TASK_SPECs; dependency ordering
 tasks/build/data tasks/build/containers/gcc
----
+EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 ---
 JOB	0
