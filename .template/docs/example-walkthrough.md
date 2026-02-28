@@ -142,11 +142,11 @@ Run the workflow in order: build, create data, run experiments, then plot. Becau
 **Single command (dependencies resolved automatically):**
 
 ```bash
-./run_tasks.sh tasks/
+./run_tasks.sh
 ```
 
 **With a workload manager (parallel submission):**
 
 ```bash
-./run_tasks.sh --workload-manager=workload_managers/palmaII-skylake.sh tasks/
+./run_tasks.sh --workload-manager=workload_managers/palmaII-skylake.sh
 ```

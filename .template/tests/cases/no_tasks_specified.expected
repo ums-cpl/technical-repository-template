@@ -1,28 +1,63 @@
-# Expect error when no tasks are given (exit non-zero)
+# No tasks passed: run all tasks under tasks/
 
-EXPECT_FAILURE:
-Error: No tasks specified.
-Usage: /home/richard/workspaces/task-driven-experimentation/run_tasks.sh [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
-
-Execute tasks. TASK can be:
-  - Task directory: path to dir containing run.sh (e.g. tasks/.../task1)
-  - Parent directory: recursively finds all descendant dirs with run.sh
-  - Wildcard: expands to matching dirs (e.g. tasks/.../*). Use !(pattern) to exclude (e.g. tasks/.../*/!(data))
-
-  Optional suffix :RUN_SPEC sets run(s). Examples: :local, :run:1:10, :run* (clean only, wildcard).
-  Without suffix: uses task's RUN_SPEC (default "assets") for execute; cleans all runs with --clean.
-  Quote the task spec if RUN_SPEC contains * or ? (e.g. "tasks/task1:run*").
-
-Options:
-  --dry-run              Create manifest without running (no workload manager submit)
-  --clean                Remove output folders for specified tasks, do not run
-  --job-name=NAME        Set job name for workload manager (default: run_tasks)
-  --walltime=TIME        Set walltime for workload manager (e.g. 1:00:00, 5:00:00)
-  --workload-manager=SCRIPT  Submit tasks as job array via workload manager script
-  --skip-succeeded       Skip task runs that have already succeeded (.run_success exists)
-  --skip-verify-def      Skip verification that container .sif matches containers/*.def
-  --run-disabled         Run tasks even if TASK_DISABLED is set in task_meta.sh
-  --include-deps         Include missing dependency task runs in the invocation instead of failing
-  -h, --help             Show this help
-
-Environment overrides (KEY=VALUE) are applied after each sourced file (task_meta.sh, run_env.sh, run_deps.sh), pinning overridden values so every subsequent file sees them.
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/plot
+1	assets	tasks/build/containers/gcc
+JOB	1
+DEPENDS	0
+0	assets	tasks/build/data
+1	assets	tasks/build/optimized
+2	assets	tasks/build/baseline
+JOB	2
+DEPENDS	1
+0	assets	tasks/experiment/MatMul/IS1/data
+1	assets	tasks/experiment/MatMul/IS2/data
+JOB	3
+DEPENDS	2
+0	assets-run1	tasks/experiment/MatMul/IS1/optimized
+1	assets-run1	tasks/experiment/MatMul/IS1/baseline
+2	assets-run1	tasks/experiment/MatMul/IS2/optimized
+3	assets-run1	tasks/experiment/MatMul/IS2/baseline
+4	assets-run2	tasks/experiment/MatMul/IS1/optimized
+5	assets-run2	tasks/experiment/MatMul/IS1/baseline
+6	assets-run2	tasks/experiment/MatMul/IS2/optimized
+7	assets-run2	tasks/experiment/MatMul/IS2/baseline
+8	assets-run3	tasks/experiment/MatMul/IS1/optimized
+9	assets-run3	tasks/experiment/MatMul/IS1/baseline
+10	assets-run3	tasks/experiment/MatMul/IS2/optimized
+11	assets-run3	tasks/experiment/MatMul/IS2/baseline
+12	assets-run4	tasks/experiment/MatMul/IS1/optimized
+13	assets-run4	tasks/experiment/MatMul/IS1/baseline
+14	assets-run4	tasks/experiment/MatMul/IS2/optimized
+15	assets-run4	tasks/experiment/MatMul/IS2/baseline
+16	assets-run5	tasks/experiment/MatMul/IS1/optimized
+17	assets-run5	tasks/experiment/MatMul/IS1/baseline
+18	assets-run5	tasks/experiment/MatMul/IS2/optimized
+19	assets-run5	tasks/experiment/MatMul/IS2/baseline
+20	assets-run6	tasks/experiment/MatMul/IS1/optimized
+21	assets-run6	tasks/experiment/MatMul/IS1/baseline
+22	assets-run6	tasks/experiment/MatMul/IS2/optimized
+23	assets-run6	tasks/experiment/MatMul/IS2/baseline
+24	assets-run7	tasks/experiment/MatMul/IS1/optimized
+25	assets-run7	tasks/experiment/MatMul/IS1/baseline
+26	assets-run7	tasks/experiment/MatMul/IS2/optimized
+27	assets-run7	tasks/experiment/MatMul/IS2/baseline
+28	assets-run8	tasks/experiment/MatMul/IS1/optimized
+29	assets-run8	tasks/experiment/MatMul/IS1/baseline
+30	assets-run8	tasks/experiment/MatMul/IS2/optimized
+31	assets-run8	tasks/experiment/MatMul/IS2/baseline
+32	assets-run9	tasks/experiment/MatMul/IS1/optimized
+33	assets-run9	tasks/experiment/MatMul/IS1/baseline
+34	assets-run9	tasks/experiment/MatMul/IS2/optimized
+35	assets-run9	tasks/experiment/MatMul/IS2/baseline
+36	assets-run10	tasks/experiment/MatMul/IS1/optimized
+37	assets-run10	tasks/experiment/MatMul/IS1/baseline
+38	assets-run10	tasks/experiment/MatMul/IS2/optimized
+39	assets-run10	tasks/experiment/MatMul/IS2/baseline
+JOB	4
+DEPENDS	3
+0	assets	tasks/plot

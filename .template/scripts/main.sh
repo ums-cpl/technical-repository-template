@@ -10,11 +10,9 @@ main() {
     exit $?
   fi
 
-  # Check if any tasks were specified
+  # When no tasks specified, run all tasks under tasks/
   if [[ ${#TASK_SPECS[@]} -eq 0 ]]; then
-    echo "Error: No tasks specified." >&2
-    usage >&2
-    exit 1
+    TASK_SPECS=("tasks")
   fi
 
   build_task_run_pairs
