@@ -1,2 +1,3 @@
 *.sif
 workload_logs/
+*.actual

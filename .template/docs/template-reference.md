@@ -142,3 +142,23 @@ Several pre-defined workload manager scripts are provided in the `workload_manag
 where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task index within that job.
 
 **Manifest format:** Header (SKIP_VERIFY_DEF, env overrides, `---`), then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and `INDEX\tRUN\tPATH` lines per task. PATH is relative to REPOSITORY_ROOT (e.g. `tasks/...`).
+
+## Test runner
+
+The test runner in `.template/tests/` checks that `run_tasks.sh --dry-run` produces the expected manifest for given task specs. Run it from the repository root.
+
+**Usage:**
+
+```bash
+./.template/tests/run_tests.sh [TEST ...]
+```
+
+- **No arguments:** Run all case files under `.template/tests/cases/` recursively. Only files with the `.expected` suffix are considered case files.
+- **With arguments:** Run only the cases specified by each TEST. TEST can be:
+  - A **case file** (path to a `.expected` file): run that case.
+  - A **directory:** run all `.expected` files under that directory recursively.
+  - A **wildcard pattern:** e.g. `.template/tests/cases/build*` or `.template/tests/cases/**/*.expected`. Bash `globstar` is enabled for `**`.
+
+TEST paths are relative to the current working directory (or absolute). For example, from the repository root you might pass `.template/tests/cases/build.expected` or `.template/tests/cases/`. The runner resolves TESTs to a deduplicated list of case files (`.expected` only), then runs each.
+
+**Case file format:** Case files use the `.expected` suffix (e.g. `build.expected`). Each case file: line 1 is the invocation args for `run_tasks.sh` (e.g. `tasks/build`). Line 2 must be exactly `---`. Lines 3 to end are the expected manifest (same format as `--dry-run` output). On manifest diff failure, the actual output is saved to a file with the same base name and `.actual` suffix (e.g. `build.actual`).
