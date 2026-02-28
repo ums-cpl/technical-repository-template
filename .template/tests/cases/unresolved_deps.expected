@@ -1,0 +1,42 @@
+# Expect error when task has dependencies not in invocation and not satisfied on disk
+tasks/experiment/MatMul/IS1/baseline
+EXPECT_FAILURE:
+Error: The following dependencies are neither in the current invocation nor satisfied on disk:
+  - tasks/build/baseline:assets
+    required by:
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+  - tasks/build/containers/gcc:assets
+    required by:
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+  - tasks/experiment/MatMul/IS1/data:assets
+    required by:
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+      - tasks/experiment/MatMul/IS1/baseline
+
+Include these dependency runs in your invocation or run them first.
