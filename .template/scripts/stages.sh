@@ -189,7 +189,7 @@ compute_stages() {
       echo "  - $dep" >&2
       echo "    required by:" >&2
       local req
-      for req in $(echo "${missing_deps[$dep]}" | tr ',' '\n' | sed 's/^ *//;s/ *$//'); do
+      for req in $(echo "${missing_deps[$dep]}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sort -u); do
         [[ -n "$req" ]] && echo "      - $req" >&2
       done
     done
