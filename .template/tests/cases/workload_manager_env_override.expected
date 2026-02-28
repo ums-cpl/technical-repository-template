@@ -1,0 +1,11 @@
+# WORKLOAD_MANAGER env override appears in JOB block
+WORKLOAD_MANAGER=workload_managers/palmaII-gpu4090.sh tasks/build/containers/gcc
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+STAGE	0
+JOB_NAME	run_tasks
+WORKLOAD_MANAGER	workload_managers/palmaII-gpu4090.sh
+DEPENDS	
+0	assets	tasks/build/containers/gcc	WORKLOAD_MANAGER=workload_managers/palmaII-gpu4090.sh

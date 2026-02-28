@@ -4,10 +4,16 @@ EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 ---
 JOB	0
+STAGE	0
+JOB_NAME	run_tasks
+WORKLOAD_MANAGER	workload_managers/direct.sh
 DEPENDS	
 0	assets	tasks/build/containers/plot
 1	assets	tasks/build/containers/gcc
 JOB	1
+STAGE	1
+JOB_NAME	run_tasks
+WORKLOAD_MANAGER	workload_managers/direct.sh
 DEPENDS	0
 0	assets	tasks/build/data
 1	assets	tasks/build/optimized

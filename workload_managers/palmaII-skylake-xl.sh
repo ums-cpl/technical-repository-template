@@ -3,6 +3,7 @@ set -euo pipefail
 
 MANIFEST="$1"
 LOG_DIR="$2"
+STAGE="${3:?Error: Stage number required.}"
 [[ -z "$MANIFEST" ]] && { echo "Error: Manifest path required." >&2; exit 1; }
 [[ -z "$LOG_DIR" ]] && { echo "Error: Log directory required." >&2; exit 1; }
 RUNNER="$REPOSITORY_ROOT/run_tasks.sh"
@@ -14,4 +15,4 @@ SBATCH_MEM="90gb"
 SBATCH_TIME="${WALLTIME:-3-00:00:00}"
 
 source "$(dirname "$0")/slurm_common.sh"
-parse_and_submit "$MANIFEST"
+parse_and_submit_stage "$MANIFEST" "$LOG_DIR" "$STAGE"

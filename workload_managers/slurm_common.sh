@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# Shared logic for SLURM workload managers: parse manifest fully, then submit jobs.
+# Shared logic for SLURM workload managers.
 # Source this from workload manager scripts after setting SBATCH_* variables.
+# Scripts are invoked as: ./script "$MANIFEST" "$LOG_DIR" "$STAGE"
 
-# Parse manifest and submit jobs. Uses: MANIFEST, RUNNER, OUTPUT_DIR (log directory), JOB_NAME, WALLTIME,
-# and SBATCH_PARTITION, SBATCH_GRES (optional), SBATCH_CPUS_PER_TASK, SBATCH_MEM, SBATCH_TIME.
-# Writes stdout and stderr to the same .log file per array task (output is typically empty).
-parse_and_submit() {
+# Parse manifest for our JOBs in the given stage, resolve DEPENDS from wm_job_ids, submit, append to wm_job_ids.
+# Uses: RUNNER, OUTPUT_DIR (use LOG_DIR), SBATCH_* variables. JOB_NAME and SBATCH_TIME come from script.
+parse_and_submit_stage() {
   local manifest="$1"
+  local log_dir="$2"
+  local stage="$3"
   [[ ! -f "$manifest" ]] && { echo "Error: Manifest not found: $manifest" >&2; exit 1; }
 
-  # --- Parse phase: fully parse manifest before any sbatch ---
+  # Identity of the script that sourced us (only run JOBs that list this WM)
+  local our_wm_abs
+  our_wm_abs="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)/$(basename "${BASH_SOURCE[1]}")"
+
+  local wm_job_ids_file="$log_dir/wm_job_ids"
+  [[ ! -f "$wm_job_ids_file" ]] && wm_job_ids_file=""
+
+  # Parse manifest: only JOB blocks where STAGE==stage and WORKLOAD_MANAGER matches us
   declare -a job_ids=()
   declare -A job_depends=()
   declare -A job_task_count=()
-  local current_job=""
-  local in_header=true
+  declare -A job_job_name=()
+  local current_job="" current_stage="" current_wm="" in_header=true
+  declare -A job_id_seen=()
 
   while IFS= read -r line; do
     if [[ "$in_header" == true ]]; then
@@ -23,7 +33,21 @@ parse_and_submit() {
     fi
     if [[ "$line" == JOB* ]]; then
       current_job=$(echo "$line" | cut -f2)
-      job_ids+=("$current_job")
+      current_stage=""
+      current_wm=""
+      continue
+    fi
+    if [[ "$line" == STAGE* ]]; then
+      current_stage=$(echo "$line" | cut -f2)
+      continue
+    fi
+    if [[ "$line" == JOB_NAME* ]]; then
+      job_job_name["$current_job"]=$(echo "$line" | cut -f2)
+      continue
+    fi
+    if [[ "$line" == WORKLOAD_MANAGER* ]]; then
+      current_wm=$(echo "$line" | cut -f2)
+      [[ "$current_wm" != /* ]] && current_wm="${REPOSITORY_ROOT:?}/$current_wm"
       continue
     fi
     if [[ "$line" == DEPENDS* ]]; then
@@ -31,58 +55,38 @@ parse_and_submit() {
       continue
     fi
     if [[ "$line" =~ ^[0-9]+[[:space:]] ]]; then
-      job_task_count["$current_job"]=$((${job_task_count["$current_job"]:-0} + 1))
+      if [[ "$current_stage" == "$stage" ]] && [[ "$current_wm" == "$our_wm_abs" ]]; then
+        job_task_count["$current_job"]=$((${job_task_count["$current_job"]:-0} + 1))
+        if [[ -z "${job_id_seen[$current_job]:-}" ]]; then
+          job_id_seen["$current_job"]=1
+          job_ids+=("$current_job")
+        fi
+      fi
     fi
   done < "$manifest"
 
-  # Validate: at least one job
-  if [[ ${#job_ids[@]} -eq 0 ]]; then
-    echo "Error: Manifest has no jobs." >&2
-    exit 1
+  # Load existing manifest_job_id -> slurm_job_id mapping
+  declare -A wm_id_map=()
+  if [[ -n "$wm_job_ids_file" ]] && [[ -f "$wm_job_ids_file" ]]; then
+    while IFS= read -r mjid wmid; do
+      [[ -n "$mjid" ]] && wm_id_map["$mjid"]="$wmid"
+    done < "$wm_job_ids_file"
   fi
 
-  # Validate: each job has tasks and DEPENDS references valid job IDs
-  local jid dep
+  # Submit our jobs and append to wm_job_ids
+  local jid dep dep_slurm job_name_val
   for jid in "${job_ids[@]}"; do
-    if [[ ${job_task_count["$jid"]:-0} -eq 0 ]]; then
-      echo "Error: Job $jid has no tasks." >&2
-      exit 1
-    fi
+    local array_max=$((${job_task_count["$jid"]:-0} - 1))
+    dep_slurm=""
     for dep in $(echo "${job_depends["$jid"]}" | tr ',' ' '); do
       dep=$(echo "$dep" | tr -d ' ')
       [[ -z "$dep" ]] && continue
-      local valid=false
-      for j in "${job_ids[@]}"; do
-        if [[ "$j" == "$dep" ]]; then
-          valid=true
-          break
-        fi
-      done
-      if [[ "$valid" != true ]]; then
-        echo "Error: Job $jid DEPENDS references invalid job $dep." >&2
-        exit 1
-      fi
-      if [[ "$dep" -ge "$jid" ]]; then
-        echo "Error: Job $jid DEPENDS on $dep (must be earlier job)." >&2
-        exit 1
-      fi
-    done
-  done
-
-  # --- Submit phase: only after parsing succeeds ---
-  declare -A slurm_job_id=()
-  local dep_list dep_jid
-
-  for jid in "${job_ids[@]}"; do
-    local array_max=$((${job_task_count["$jid"]} - 1))
-    local dep_slurm=""
-    for dep in $(echo "${job_depends["$jid"]}" | tr ',' ' '); do
-      dep=$(echo "$dep" | tr -d ' ')
-      [[ -z "$dep" ]] && continue
-      dep_jid="${slurm_job_id[$dep]:-}"
-      if [[ -n "$dep_jid" ]]; then
+      local wmid="${wm_id_map[$dep]:-}"
+      [[ -z "$wmid" ]] && continue
+      # Only add numeric SLURM ids as afterok (skip non-numeric like "completed" if any)
+      if [[ "$wmid" =~ ^[0-9]+$ ]]; then
         [[ -n "$dep_slurm" ]] && dep_slurm+=","
-        dep_slurm+="$dep_jid"
+        dep_slurm+="$wmid"
       fi
     done
 
@@ -92,7 +96,10 @@ parse_and_submit() {
     local gres_line=""
     [[ -n "${SBATCH_GRES:-}" ]] && gres_line="#SBATCH --gres=${SBATCH_GRES}"
 
-    local tmp=$(mktemp)
+    job_name_val="${job_job_name[$jid]:-run_tasks}"
+
+    local tmp
+    tmp=$(mktemp)
     {
       echo "#!/bin/bash"
       echo "#SBATCH --array=0-${array_max}"
@@ -100,16 +107,18 @@ parse_and_submit() {
       [[ -n "$gres_line" ]] && echo "$gres_line"
       echo "#SBATCH --cpus-per-task=${SBATCH_CPUS_PER_TASK}"
       echo "#SBATCH --mem=${SBATCH_MEM}"
-      echo "#SBATCH --time=${SBATCH_TIME:-${WALLTIME:-2:00:00}}"
-      echo "#SBATCH --job-name=${JOB_NAME:-run_tasks}_${jid}"
-      echo "#SBATCH --output=${OUTPUT_DIR}/job${jid}_%a.log"
+      echo "#SBATCH --time=${SBATCH_TIME:-2:00:00}"
+      echo "#SBATCH --job-name=${job_name_val}_${jid}"
+      echo "#SBATCH --output=${log_dir}/job${jid}_%a.log"
       [[ -n "$dep_line" ]] && echo "$dep_line"
       echo ""
       echo "module add Apptainer"
       echo "exec \"$RUNNER\" --array-manifest=\"$manifest\" --array-job-id=\"$jid\" --array-task-id=\${SLURM_ARRAY_TASK_ID}"
     } > "$tmp"
-    slurm_job_id["$jid"]=$(sbatch --parsable "$tmp")
+    local slurm_id
+    slurm_id=$(sbatch --parsable "$tmp")
     rm -f "$tmp"
-    echo "Submitted job $jid (SLURM ${slurm_job_id[$jid]}) with ${job_task_count["$jid"]} task(s)"
+    echo "$jid	$slurm_id" >> "$log_dir/wm_job_ids"
+    echo "Submitted job $jid (SLURM $slurm_id) with ${job_task_count["$jid"]} task(s)"
   done
 }

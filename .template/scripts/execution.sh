@@ -216,10 +216,16 @@ RUNNER_SCRIPT
   return $?
 }
 
-# Creates a single manifest file with multiple jobs, each with tasks and dependencies.
-# Format: header (SKIP_VERIFY_DEF, ---), then JOB blocks with DEPENDS and INDEX<TAB>RUN<TAB>PATH[<TAB>KEY=VALUE...].
-# When RUN_TASKS_PRECOMPUTED_TASK_STAGE and RUN_TASKS_PRECOMPUTED_MAX_STAGE are set (by main for direct
-# execution), uses them instead of calling compute_stages. Avoids duplicate stage computation.
+# True if WM path denotes direct.sh (no mixing with cluster WMs).
+is_direct_wm() {
+  local wm="$1"
+  [[ "$wm" == *"/direct.sh" ]] || [[ "$wm" == "workload_managers/direct.sh" ]]
+}
+
+# Creates a single manifest file. Group by (stage, JOB_NAME, WORKLOAD_MANAGER).
+# Format: header (SKIP_VERIFY_DEF, ---), then JOB blocks with STAGE, JOB_NAME, WORKLOAD_MANAGER, DEPENDS, task lines.
+# Errors if both direct.sh and other WMs appear (mixing not supported).
+# When RUN_TASKS_PRECOMPUTED_TASK_STAGE and RUN_TASKS_PRECOMPUTED_MAX_STAGE are set, uses them.
 create_manifest() {
   local -n _task_run_pairs=$1
   local -n _tasks_unique=$2
@@ -239,8 +245,89 @@ create_manifest() {
     compute_stages "$2" "$1" task_stage max_stage task_dep_checks
   fi
 
-  job_safe="${JOB_NAME:-run_tasks}"
-  job_safe="${job_safe//[\/ ]/_}"
+  # Group pair indices by (stage, JOB_NAME, WORKLOAD_MANAGER)
+  declare -A group_keys=()
+  declare -A group_pairs=()
+  local has_direct=false
+  local has_non_direct=false
+  local idx pair occ_key st wm jname key
+  for ((idx=0; idx<${#_task_run_pairs[@]}; idx++)); do
+    pair="${_task_run_pairs[$idx]}"
+    occ_key="${TASK_RUN_PAIR_OCC_KEYS[$idx]:-}"
+    st="${task_stage[$occ_key]:--1}"
+    wm="${TASK_RUN_PAIR_WM[$idx]:-workload_managers/direct.sh}"
+    jname="${TASK_RUN_PAIR_JOB_NAME[$idx]:-}"
+    is_direct_wm "$wm" && has_direct=true || has_non_direct=true
+    key="${st}	${jname}	${wm}"
+    group_keys["$key"]=1
+    group_pairs["$key"]="${group_pairs["$key"]:+${group_pairs["$key"]} }$idx"
+  done
+  if [[ "$has_direct" == true && "$has_non_direct" == true ]]; then
+    echo "Error: Mixing workload_managers/direct.sh with other workload managers is not supported. Use either only direct.sh or only other workload managers." >&2
+    exit 1
+  fi
+
+  # Order groups by stage, then by first occurrence (min pair index) for stable spec order
+  local -a ordered_keys=()
+  local stage stage_keys key min_idx idx
+  for stage in $(seq 0 "$max_stage"); do
+    stage_keys=()
+    for key in "${!group_keys[@]}"; do
+      [[ "$key" == "$stage"* ]] || continue
+      stage_keys+=("$key")
+    done
+    # Sort by minimum pair index in group so order follows spec order
+    while IFS= read -r key; do
+      [[ -n "$key" ]] && ordered_keys+=("$key")
+    done < <(
+      for key in "${stage_keys[@]}"; do
+        min_idx=999999
+        for idx in ${group_pairs[$key]:-}; do
+          [[ $idx -lt $min_idx ]] && min_idx=$idx
+        done
+        printf '%d\t%s\n' "${min_idx}" "$key"
+      done | sort -n -t$'\t' -k1,1 | cut -f2-
+    )
+  done
+
+  # Only assign job_id to blocks that have at least one task to emit (SKIP_SUCCEEDED filter)
+  local -a emitted_keys=()
+  local idx pair
+  for key in "${ordered_keys[@]}"; do
+    local -a indices=()
+    read -ra indices <<< "${group_pairs[$key]:-}"
+    local has_any=false
+    for idx in "${indices[@]}"; do
+      [[ "$SKIP_SUCCEEDED" != true ]] || ! is_task_succeeded "${_task_run_pairs[$idx]%%	*}" "${_task_run_pairs[$idx]#*	}" && { has_any=true; break; }
+    done
+    [[ "$has_any" == true ]] && emitted_keys+=("$key")
+  done
+
+  declare -A key_to_job_id=()
+  local job_id=0
+  for key in "${emitted_keys[@]}"; do
+    key_to_job_id["$key"]=$job_id
+    ((job_id++)) || true
+  done
+
+  # Per-stage list of job ids (for DEPENDS), only emitted blocks
+  declare -A stage_job_ids=()
+  for key in "${emitted_keys[@]}"; do
+    stage="${key%%	*}"
+    jid="${key_to_job_id[$key]}"
+    stage_job_ids["$stage"]="${stage_job_ids[$stage]:+${stage_job_ids[$stage]},}$jid"
+  done
+
+  # Invocation dir name: first non-empty JOB_NAME in manifest, else run_tasks
+  job_safe="run_tasks"
+  for key in "${emitted_keys[@]}"; do
+    jname="${key#*	}"
+    jname="${jname%%	*}"
+    if [[ -n "$jname" ]]; then
+      job_safe="${jname//[\/ ]/_}"
+      break
+    fi
+  done
   inv_dir="$RUN_TASKS_OUTPUT_ROOT/${job_safe}"
   if [[ -d "$inv_dir" ]]; then
     n=1
@@ -253,33 +340,39 @@ create_manifest() {
   print_manifest_content() {
     echo "SKIP_VERIFY_DEF=$SKIP_VERIFY_DEF"
     echo "---"
-    local stage job_id task_dir run_name i idx prev_job_id=-1
-    local -a pair_indices=()
-    for stage in $(seq 0 "$max_stage"); do
-      pair_indices=()
-      for ((idx=0; idx<${#_task_run_pairs[@]}; idx++)); do
-        local pair="${_task_run_pairs[$idx]}"
-        local occ_key="${TASK_RUN_PAIR_OCC_KEYS[$idx]:-}"
-        task_dir="${pair%%	*}"
-        run_name="${pair#*	}"
-        [[ "${task_stage[$occ_key]:--1}" != "$stage" ]] && continue
-        if [[ "$SKIP_SUCCEEDED" != true ]] || ! is_task_succeeded "$task_dir" "$run_name"; then
-          pair_indices+=("$idx")
-        fi
+    local key task_dir run_name overrides dep_list prev_stage i
+    for key in "${emitted_keys[@]}"; do
+      stage="${key%%	*}"
+      jname="${key#*	}"
+      jname="${jname%%	*}"
+      wm="${key#*	}"
+      wm="${wm#*	}"
+      job_id="${key_to_job_id[$key]}"
+      prev_stage=$((stage - 1))
+      dep_list=""
+      [[ $prev_stage -ge 0 ]] && dep_list="${stage_job_ids[$prev_stage]:-}"
+
+      local -a indices=()
+      read -ra indices <<< "${group_pairs[$key]:-}"
+      local -a to_emit=()
+      for idx in "${indices[@]}"; do
+        [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "${_task_run_pairs[$idx]%%	*}" "${_task_run_pairs[$idx]#*	}" && continue
+        to_emit+=("$idx")
       done
-      [[ ${#pair_indices[@]} -eq 0 ]] && continue
-      job_id=$((prev_job_id + 1))
+      [[ ${#to_emit[@]} -eq 0 ]] && continue
+
       echo "JOB	$job_id"
-      local dep_list=""
-      [[ $prev_job_id -ge 0 ]] && dep_list="$prev_job_id"
+      echo "STAGE	$stage"
+      echo "JOB_NAME	$jname"
+      echo "WORKLOAD_MANAGER	$wm"
       echo "DEPENDS	$dep_list"
       i=0
-      for idx in "${pair_indices[@]}"; do
-        local pair="${_task_run_pairs[$idx]}"
+      for idx in "${to_emit[@]}"; do
+        pair="${_task_run_pairs[$idx]}"
         task_dir="${pair%%	*}"
         run_name="${pair#*	}"
         relative_path="${task_dir#$REPOSITORY_ROOT/}"
-        local overrides="${TASK_RUN_PAIR_OVERRIDES[$idx]:-}"
+        overrides="${TASK_RUN_PAIR_OVERRIDES[$idx]:-}"
         if [[ -n "$overrides" ]]; then
           printf '%d\t%s\t%s\t%s\n' "$i" "$run_name" "$relative_path" "$overrides"
         else
@@ -287,7 +380,6 @@ create_manifest() {
         fi
         i=$((i + 1))
       done
-      prev_job_id=$job_id
     done
   }
 

@@ -4,6 +4,9 @@ EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 ---
 JOB	0
+STAGE	0
+JOB_NAME	run_tasks
+WORKLOAD_MANAGER	workload_managers/direct.sh
 DEPENDS	
 0	cpu	tasks/build/containers/gcc	BUILD_FOLDER=cpu
 1	gpu	tasks/build/containers/gcc	BUILD_FOLDER=gpu

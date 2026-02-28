@@ -1,0 +1,11 @@
+# JOB_NAME env override appears in JOB block and on task line
+JOB_NAME=test tasks/build/containers/gcc
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+STAGE	0
+JOB_NAME	test
+WORKLOAD_MANAGER	workload_managers/direct.sh
+DEPENDS	
+0	assets	tasks/build/containers/gcc	JOB_NAME=test

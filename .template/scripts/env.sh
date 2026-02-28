@@ -89,6 +89,31 @@ resolve_task_var() {
   " 2>/dev/null || true
 }
 
+# Return 1 if the variable is set (including to empty) in the task_meta.sh chain, 0 if unset.
+# Used to distinguish "unset" (use default) from "explicitly set to empty".
+resolve_task_var_isset() {
+  local task_dir="$1"
+  local var_name="$2"
+
+  local meta_files=()
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && meta_files+=("$f")
+  done < <(get_task_meta_files "$task_dir")
+
+  local source_cmds
+  source_cmds=$(build_source_cmds_with_overrides meta_files)
+
+  bash -c "
+    export CONTAINERS=\"$CONTAINERS\"
+    export ASSETS=\"$ASSETS\"
+    export TASKS=\"$TASKS\"
+    export WORKLOAD_MANAGERS=\"$WORKLOAD_MANAGERS\"
+    $source_cmds
+    if [[ -n \"\${$var_name+x}\" ]]; then echo -n 1; else echo -n 0; fi
+  " 2>/dev/null || true
+}
+
 # Get DEPENDENCIES for a task run by sourcing task_meta.sh chain, then run_deps.sh chain,
 # with framework vars and RUN_ID. Returns array of dependency specs.
 get_task_dependencies() {

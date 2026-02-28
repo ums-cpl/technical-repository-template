@@ -17,9 +17,6 @@ Execute tasks. If no TASK is given, all tasks under tasks/ are run. TASK can be:
 Options:
   --dry-run              Create manifest without running (no workload manager invoke)
   --clean                Remove output folders for specified tasks, do not run
-  --job-name=NAME        Set job name for workload manager (default: run_tasks)
-  --walltime=TIME        Set walltime for workload manager (e.g. 1:00:00, 5:00:00)
-  --workload-manager=SCRIPT  Use workload manager script (default: workload_managers/direct.sh for direct execution)
   --skip-succeeded       Skip task runs that have already succeeded (.run_success exists)
   --skip-verify-def      Skip verification that container .sif matches containers/*.def
   --run-disabled         Run tasks even if TASK_DISABLED is set in task_meta.sh
@@ -54,18 +51,6 @@ parse_args() {
         ;;
       --clean)
         CLEAN=true
-        shift
-        ;;
-      --job-name=*)
-        JOB_NAME="${1#--job-name=}"
-        shift
-        ;;
-      --walltime=*)
-        WALLTIME="${1#--walltime=}"
-        shift
-        ;;
-      --workload-manager=*)
-        WORKLOAD_MANAGER_SCRIPT="${1#--workload-manager=}"
         shift
         ;;
       --array-manifest=*)

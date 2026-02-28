@@ -1,0 +1,17 @@
+# Same-stage tasks with different JOB_NAMEs get separate JOB blocks
+JOB_NAME=a tasks/build/containers/gcc JOB_NAME=b tasks/build/containers/plot
+EXPECT_SUCCESS:
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+STAGE	0
+JOB_NAME	a
+WORKLOAD_MANAGER	workload_managers/direct.sh
+DEPENDS	
+0	assets	tasks/build/containers/gcc	JOB_NAME=a
+JOB	1
+STAGE	0
+JOB_NAME	b
+WORKLOAD_MANAGER	workload_managers/direct.sh
+DEPENDS	
+0	assets	tasks/build/containers/plot	JOB_NAME=b

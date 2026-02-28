@@ -230,6 +230,8 @@ build_task_run_pairs() {
   done
 
   # Assign occurrence keys and build output arrays
+  TASK_RUN_PAIR_WM=()
+  TASK_RUN_PAIR_JOB_NAME=()
   local pair_override
   for pair_override in "${pairs_with_override[@]}"; do
     local task_dir="${pair_override%%	*}"
@@ -250,9 +252,31 @@ build_task_run_pairs() {
       occ_key="${occ_key_by_task_override["$task_dir	$ov_tsv"]}"
     fi
 
+    local pair_ov_tsv
+    pair_ov_tsv=$(reduce_override_to_final_per_key "$ov_tsv")
     TASK_RUN_PAIRS+=("$task_dir	$run_name")
-    TASK_RUN_PAIR_OVERRIDES+=("$(reduce_override_to_final_per_key "$ov_tsv")")
+    TASK_RUN_PAIR_OVERRIDES+=("$pair_ov_tsv")
     TASK_RUN_PAIR_OCC_KEYS+=("$occ_key")
+
+    # Resolve WORKLOAD_MANAGER and JOB_NAME per pair (with this pair's overrides)
+    ENV_OVERRIDES=()
+    [[ -n "$pair_ov_tsv" ]] && IFS=$'\t' read -ra ENV_OVERRIDES <<< "$pair_ov_tsv"
+    local wm job_name
+    wm=$(resolve_task_var "$task_dir" "WORKLOAD_MANAGER")
+    [[ -z "$wm" ]] && wm="workload_managers/direct.sh"
+    job_name=$(resolve_task_var "$task_dir" "JOB_NAME")
+    # Default to run_tasks only when JOB_NAME is unset (neither in overrides nor task_meta.sh)
+    if [[ -z "$job_name" ]]; then
+      local is_set
+      is_set=$(resolve_task_var_isset "$task_dir" "JOB_NAME")
+      if [[ "$is_set" == "1" ]]; then
+        job_name=""   # explicitly set to empty
+      else
+        job_name="run_tasks"
+      fi
+    fi
+    TASK_RUN_PAIR_WM+=("$wm")
+    TASK_RUN_PAIR_JOB_NAME+=("$job_name")
   done
 
   # TASKS_UNIQUE: unique task dirs for display (first occurrence order)

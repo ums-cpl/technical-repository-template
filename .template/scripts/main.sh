@@ -101,15 +101,7 @@ main() {
       exit 0
     fi
 
-    # Workload manager path: default to direct.sh when none set; create manifest, invoke workload manager
-    WORKLOAD_MANAGER_SCRIPT="${WORKLOAD_MANAGER_SCRIPT:-workload_managers/direct.sh}"
-    local wm_script manifest_path
-    wm_script="$WORKLOAD_MANAGER_SCRIPT"
-    [[ "$wm_script" != /* ]] && wm_script="$REPOSITORY_ROOT/$wm_script"
-    if [[ ! -f "$wm_script" ]]; then
-      echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
-      exit 1
-    fi
+    # Create manifest and determine execution mode (all-direct vs cluster)
     manifest_path=$(create_manifest TASK_RUN_PAIRS TASK_OCC_KEYS)
     if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
       echo "All tasks already succeeded, nothing to submit."
@@ -117,9 +109,57 @@ main() {
     fi
     log_dir="$(dirname "$manifest_path")"
     export REPOSITORY_ROOT
-    [[ -n "$JOB_NAME" ]] && export JOB_NAME
-    [[ -n "$WALLTIME" ]] && export WALLTIME
-    bash "$wm_script" "$manifest_path" "$log_dir"
+
+    # Parse manifest: max stage and whether all WMs are direct.sh
+    max_stage_manifest=0
+    all_direct=true
+    while IFS= read -r line; do
+      if [[ "$line" == STAGE* ]]; then
+        s="${line#*	}"
+        [[ "$s" =~ ^[0-9]+$ ]] && [[ $s -gt $max_stage_manifest ]] && max_stage_manifest=$s
+      elif [[ "$line" == WORKLOAD_MANAGER* ]]; then
+        wm_val="${line#*	}"
+        is_direct_wm "$wm_val" || all_direct=false
+      fi
+    done < "$manifest_path"
+
+    if [[ "$all_direct" == true ]]; then
+      # All-direct mode: invoke direct.sh once per stage (no wm_job_ids)
+      for stage in $(seq 0 "$max_stage_manifest"); do
+        bash "$REPOSITORY_ROOT/workload_managers/direct.sh" "$manifest_path" "$log_dir" "$stage" || exit $?
+      done
+    else
+      # Cluster mode: per-stage WM invocation, wm_job_ids in log_dir
+      : > "$log_dir/wm_job_ids"
+      for stage in $(seq 0 "$max_stage_manifest"); do
+        # Unique WMs that have at least one JOB in this stage
+        wms_for_stage=()
+        current_stage=""
+        while IFS= read -r line; do
+          if [[ "$line" == STAGE* ]]; then
+            current_stage="${line#*	}"
+          elif [[ "$line" == WORKLOAD_MANAGER* ]] && [[ "$current_stage" == "$stage" ]]; then
+            wms_for_stage+=("${line#*	}")
+          fi
+        done < "$manifest_path"
+        # Deduplicate (preserve order)
+        local seen_wm=() wm_path wm_script s found
+        for wm_path in "${wms_for_stage[@]}"; do
+          [[ -z "$wm_path" ]] && continue
+          local found=0
+          for s in "${seen_wm[@]}"; do [[ "$s" == "$wm_path" ]] && { found=1; break; }; done
+          [[ $found -eq 1 ]] && continue
+          seen_wm+=("$wm_path")
+          wm_script="$wm_path"
+          [[ "$wm_script" != /* ]] && wm_script="$REPOSITORY_ROOT/$wm_script"
+          if [[ ! -f "$wm_script" ]]; then
+            echo "Error: Workload manager script not found: $wm_path" >&2
+            exit 1
+          fi
+          bash "$wm_script" "$manifest_path" "$log_dir" "$stage" || exit $?
+        done
+      done
+    fi
     exit $?
   fi
 }
