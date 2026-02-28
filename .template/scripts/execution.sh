@@ -101,6 +101,15 @@ run_task() {
     fi
   fi
 
+  # Build overrides section for .run_metadata (embed KEY=VALUE lines in generated script)
+  local overrides_meta=""
+  local ov
+  for ov in "${ENV_OVERRIDES[@]}"; do
+    escaped_ov=$(printf '%s' "$ov" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    overrides_meta+="  echo \"$escaped_ov\"
+"
+  done
+
   # Create runner script (self-contained for manual re-runs; invokes apptainer when CONTAINER set)
   mkdir -p "$run_folder"
   local runner_script="$run_folder/.run_script.sh"
@@ -143,6 +152,20 @@ cd "\$RUN_FOLDER"
     echo "not a git repository"
   fi
   echo ""
+  echo "=== overrides ==="
+$overrides_meta  echo ""
+
+  echo "=== framework variables ==="
+  # Task (task_meta.sh) and task run (RUN_ID) writable variables read by framework; see template-reference.md
+  echo "CONTAINER=\${CONTAINER:-}"
+  echo "CONTAINER_DEF=\${CONTAINER_DEF:-}"
+  echo "CONTAINER_GPU=\${CONTAINER_GPU:-}"
+  echo "RUN_SPEC=\${RUN_SPEC:-}"
+  echo "WORKLOAD_MANAGER=\${WORKLOAD_MANAGER:-}"
+  echo "TASK_DISABLED=\${TASK_DISABLED:-}"
+  echo "RUN_ID=\${RUN_ID:-}"
+  echo ""
+
   echo "=== container ==="
   echo "container: ${container_path:-}"
   echo "container_def: ${container_def:-}"
