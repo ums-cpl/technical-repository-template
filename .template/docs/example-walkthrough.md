@@ -118,7 +118,7 @@ Build tasks use `$BUILD_FOLDER` for a single run, so the folder is named after t
 
 ## Running the Example
 
-Run the workflow in order: build, create data, run experiments, then plot. Because dependencies are declared in `run_deps.sh` and `RUN_SPEC` patterns in `task_meta.sh`, you can also submit the full workflow in a single command. For parallel execution on a cluster, pass `--workload-manager` (e.g. `workload_managers/palmaII-skylake.sh`). To remove task output, use `--clean`.
+Run the workflow in order: build, create data, run experiments, then plot. Because dependencies are declared in `run_deps.sh` and `RUN_SPEC` patterns in `task_meta.sh`, you can also run the full workflow in a single command. By default, the direct workload manager runs tasks sequentially in the current process. For parallel execution on a cluster, pass `--workload-manager=workload_managers/palmaII-skylake.sh`. To remove task output, use `--clean`.
 
 **Step-by-step:**
 
@@ -145,7 +145,7 @@ Run the workflow in order: build, create data, run experiments, then plot. Becau
 ./run_tasks.sh
 ```
 
-**With a workload manager (parallel submission):**
+**With a cluster workload manager (parallel submission):**
 
 ```bash
 ./run_tasks.sh --workload-manager=workload_managers/palmaII-skylake.sh

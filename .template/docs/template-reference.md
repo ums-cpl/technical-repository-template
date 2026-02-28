@@ -1,6 +1,6 @@
 # Template Reference
 
-This template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code from `assets/`, optionally inside `containers/`, and can be submitted in parallel via `workload_managers/`.
+This template centers on `run_tasks.sh`, which executes tasks defined under `tasks/`. Tasks invoke code from `assets/`, optionally inside `containers/`, and are executed by a workload manager (by default `workload_managers/direct.sh` runs tasks sequentially in the current process).
 
 ## run_tasks.sh
 
@@ -128,9 +128,9 @@ Containers provide a fixed environment for running tasks and document how to bui
 
 ## Workload Managers
 
-Workload manager scripts allow running tasks in parallel to reduce overall runtime. `run_tasks.sh` creates a manifest and invokes the script; the script submits one or multiple job arrays where each array element runs one task.
+Execution always goes through a workload manager. `run_tasks.sh` creates a manifest and invokes the chosen script with the manifest path and log directory. The default is `workload_managers/direct.sh`, which runs tasks sequentially in the current process (no cluster). For parallel execution on a cluster, pass `--workload-manager=workload_managers/<script>`; those scripts submit job arrays to the scheduler (e.g. SLURM), and each array element runs one task.
 
-Several pre-defined workload manager scripts are provided in the `workload_managers/` directory. These scripts are categorized by CPU or GPU architecture and the expected runtime. The default script has no suffix; scripts with suffixes like `l`, `xl`, or `xxl` are intended for longer runtimes, while the `compact` script is suited for sequential or low-resource tasks such as compilation.
+Several cluster workload manager scripts are provided in the `workload_managers/` directory, categorized by CPU or GPU architecture and expected runtime. Scripts with suffixes like `l`, `xl`, or `xxl` are for longer runtimes; the `compact` script is suited for sequential or low-resource tasks such as compilation.
 
 **Interface:** A workload manager script is invoked as:
 

@@ -101,74 +101,25 @@ main() {
       exit 0
     fi
 
-    # Workload manager path: create manifest, invoke workload manager (single arg)
-    if [[ -n "$WORKLOAD_MANAGER_SCRIPT" ]]; then
-      local wm_script manifest_path
-      wm_script="$WORKLOAD_MANAGER_SCRIPT"
-      [[ "$wm_script" != /* ]] && wm_script="$REPOSITORY_ROOT/$wm_script"
-      if [[ ! -f "$wm_script" ]]; then
-        echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
-        exit 1
-      fi
-      manifest_path=$(create_manifest TASK_RUN_PAIRS TASK_OCC_KEYS)
-      if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
-        echo "All tasks already succeeded, nothing to submit."
-        exit 0
-      fi
-      log_dir="$(dirname "$manifest_path")"
-      export REPOSITORY_ROOT
-      [[ -n "$JOB_NAME" ]] && export JOB_NAME
-      [[ -n "$WALLTIME" ]] && export WALLTIME
-      bash "$wm_script" "$manifest_path" "$log_dir"
-      exit $?
+    # Workload manager path: default to direct.sh when none set; create manifest, invoke workload manager
+    WORKLOAD_MANAGER_SCRIPT="${WORKLOAD_MANAGER_SCRIPT:-workload_managers/direct.sh}"
+    local wm_script manifest_path
+    wm_script="$WORKLOAD_MANAGER_SCRIPT"
+    [[ "$wm_script" != /* ]] && wm_script="$REPOSITORY_ROOT/$wm_script"
+    if [[ ! -f "$wm_script" ]]; then
+      echo "Error: Workload manager script not found: $WORKLOAD_MANAGER_SCRIPT" >&2
+      exit 1
     fi
-
-    # Direct execution: create manifest (for audit), run stages sequentially
-    local manifest_path
     manifest_path=$(create_manifest TASK_RUN_PAIRS TASK_OCC_KEYS)
-
-    local total_ops=${#TASK_RUN_PAIRS[@]}
-    local current=0
-    local succeeded=0
-    local failed=0
-    local skipped=0
-
-    echo "Running $total_ops run(s) across $total task(s) in $((max_stage + 1)) stage(s)..."
-    for stage in $(seq 0 "$max_stage"); do
-      echo ""
-      echo "--- Stage $stage ---"
-      check_stage_deps "$stage" TASK_OCC_KEYS task_stage task_dep_checks TASK_RUN_PAIRS
-      local idx
-      for ((idx=0; idx<${#TASK_RUN_PAIRS[@]}; idx++)); do
-        local pair="${TASK_RUN_PAIRS[$idx]}"
-        local occ_key="${TASK_RUN_PAIR_OCC_KEYS[$idx]:-}"
-        local task_dir="${pair%%	*}"
-        local run_name="${pair#*	}"
-        [[ "${task_stage[$occ_key]:--1}" != "$stage" ]] && continue
-        current=$((current + 1))
-        ENV_OVERRIDES=()
-        local ov_tsv="${TASK_RUN_PAIR_OVERRIDES[$idx]:-}"
-        if [[ -n "$ov_tsv" ]]; then
-          IFS=$'\t' read -ra ENV_OVERRIDES <<< "$ov_tsv"
-        fi
-        local rel_path="${task_dir#$TASKS/}"
-        printf "[%0${#total_ops}d/%0${#total_ops}d] %s/%s ... " "$current" "$total_ops" "$rel_path" "$run_name"
-        if [[ "$SKIP_SUCCEEDED" == true ]] && is_task_succeeded "$task_dir" "$run_name"; then
-          echo -e "\033[0;33mSKIPPED\033[0m"
-          skipped=$((skipped + 1))
-        elif run_task "$task_dir" "$run_name"; then
-          echo -e "\033[0;32mSUCCESS\033[0m"
-          succeeded=$((succeeded + 1))
-        else
-          echo -e "\033[0;31mFAILED\033[0m"
-          failed=$((failed + 1))
-        fi
-      done
-    done
-    echo
-    local summary="Finished with $succeeded successes and $failed failures."
-    [[ $skipped -gt 0 ]] && summary="$summary $skipped already succeeded (skipped)."
-    echo "$summary"
-    exit $((failed > 0 ? 1 : 0))
+    if [[ "$SKIP_SUCCEEDED" == true ]] && ! grep -q '^JOB	' "$manifest_path"; then
+      echo "All tasks already succeeded, nothing to submit."
+      exit 0
+    fi
+    log_dir="$(dirname "$manifest_path")"
+    export REPOSITORY_ROOT
+    [[ -n "$JOB_NAME" ]] && export JOB_NAME
+    [[ -n "$WALLTIME" ]] && export WALLTIME
+    bash "$wm_script" "$manifest_path" "$log_dir"
+    exit $?
   fi
 }
