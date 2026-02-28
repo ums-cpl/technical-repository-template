@@ -141,4 +141,4 @@ Several pre-defined workload manager scripts are provided in the `workload_manag
 
 where `<JOB>` is the job ID from the manifest and `<INDEX>` is the 0-based task index within that job.
 
-**Manifest format:** Header (SKIP_VERIFY_DEF, env overrides, `---`), then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and `INDEX\tRUN\tPATH` lines per task.
+**Manifest format:** Header (SKIP_VERIFY_DEF, env overrides, `---`), then job blocks: `JOB\t<N>`, `DEPENDS\t<id1>,<id2>`, and `INDEX\tRUN\tPATH` lines per task. PATH is relative to REPOSITORY_ROOT (e.g. `tasks/...`).

@@ -258,7 +258,8 @@ create_manifest() {
       for pair in "${pairs[@]}"; do
         task_dir="${pair%%	*}"
         run_name="${pair#*	}"
-        printf '%d\t%s\t%s\n' "$i" "$run_name" "$task_dir"
+        relative_path="${task_dir#$REPOSITORY_ROOT/}"
+        printf '%d\t%s\t%s\n' "$i" "$run_name" "$relative_path"
         i=$((i + 1))
       done
       prev_job_id=$job_id
@@ -271,6 +272,7 @@ create_manifest() {
 set -euo pipefail
 MANIFEST="$(cd "$(dirname "$0")" && pwd)/manifest"
 [[ ! -f "$MANIFEST" ]] && { echo "Error: manifest not found: $MANIFEST" >&2; exit 1; }
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 echo "JOB/IDX  RUN                          PATH                                                              STATUS "
 echo "-------  ---------------------------  ----------------------------------------------------------------  -------"
 prev_job=""
@@ -280,7 +282,7 @@ while IFS=$'\t' read -r job_id idx run path; do
     [[ -n "$prev_job" ]] && echo ""
     prev_job="$job_id"
   fi
-  run_folder="$path/$run"
+  run_folder="$REPO_ROOT/$path/$run"
   if [[ -f "$run_folder/.run_success" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.run_success" ]]; then
     status=$'\033[32mSUCCESS\033[0m'
   elif [[ -f "$run_folder/.run_failed" ]] && [[ ! "$MANIFEST" -nt "$run_folder/.run_failed" ]]; then
@@ -334,6 +336,7 @@ run_array_task() {
   fi
   run_name=$(echo "$manifest_line" | awk -F'\t' '{print $2}')
   task_dir=$(echo "$manifest_line" | awk -F'\t' '{print $3}')
+  [[ "$task_dir" != /* ]] && task_dir="$REPOSITORY_ROOT/$task_dir"
 
   run_task "$task_dir" "$run_name"
 }
