@@ -1,0 +1,9 @@
+# KEY=VALUE env overrides appear in manifest
+FOO=bar tasks/build/containers/gcc
+---
+SKIP_VERIFY_DEF=false
+FOO=bar
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/gcc

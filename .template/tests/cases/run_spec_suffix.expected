@@ -1,0 +1,18 @@
+# path:run_spec suffix; multi-stage experiment deps
+--include-deps tasks/experiment/MatMul/IS1/baseline:assets-run1
+---
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/gcc
+JOB	1
+DEPENDS	0
+0	assets	tasks/build/baseline
+1	assets	tasks/build/data
+JOB	2
+DEPENDS	1
+0	assets	tasks/experiment/MatMul/IS1/data
+JOB	3
+DEPENDS	2
+0	assets-run1	tasks/experiment/MatMul/IS1/baseline

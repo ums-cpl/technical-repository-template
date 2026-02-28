@@ -1,0 +1,11 @@
+# Multiple TASK_SPECs; dependency ordering
+tasks/build/data tasks/build/containers/gcc
+---
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/gcc
+JOB	1
+DEPENDS	0
+0	assets	tasks/build/data

@@ -1,0 +1,11 @@
+# --run-disabled: include TASK_DISABLED task (e.g. build/debug)
+--run-disabled --include-deps tasks/build/debug
+---
+SKIP_VERIFY_DEF=false
+---
+JOB	0
+DEPENDS	
+0	assets	tasks/build/containers/gcc
+JOB	1
+DEPENDS	0
+0	assets	tasks/build/debug
