@@ -12,7 +12,7 @@ Used to run tasks.
 ./run_tasks.sh [OPTIONS] [KEY=VALUE ...] TASK [TASK ...]
 ```
 
-**KEY=VALUE** pairs are environment overrides. They are **positional and accumulate**: each `KEY=VALUE` applies from that point onward to all subsequent task specs. For example, `FOO=1 task1 FOO=2 task2` gives `task1` the set `{FOO=1}` and `task2` the set `{FOO=1, FOO=2}` (later values win). Overrides are applied after each sourced file (`task_meta.sh`, `run_env.sh`, `run_deps.sh`) so every file in the chain sees them. If the same task and run are specified twice with different override context (e.g. `FOO=1 tasks/build/gcc FOO=2 tasks/build/gcc`), they run in consecutive stages and the second occurrence overwrites the first in the same run folder.
+**KEY=VALUE** pairs are environment overrides. They are **positional and accumulate**: each `KEY=VALUE` applies from that point onward to all subsequent task specs. For example, `FOO=1 task1 FOO=2 BAR=3 task2` gives `task1` the set `{FOO=1}` and `task2` the set `{FOO=2, BAR=3}` (later values win). Overrides are applied after each sourced file (`task_meta.sh`, `run_env.sh`, `run_deps.sh`) so every file in the chain sees them. If the same task and run are specified twice with different override context (e.g. `FOO=1 tasks/build/gcc FOO=2 tasks/build/gcc`), they run in consecutive stages and the second occurrence overwrites the first in the same run folder.
 
 **TASK** can be:
 
@@ -24,17 +24,19 @@ Optional suffix `:RUN_SPEC` overrides the task's `RUN_SPEC` (set in `task_meta.s
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--dry-run` | Create manifest without running; print manifest contents to stdout |
-| `--clean` | Remove output folders for specified tasks |
-| `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script |
-| `--job-name=NAME` | Job name for workload manager |
-| `--walltime=TIME` | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
-| `--skip-succeeded` | Skip task runs that have already succeeded (`.run_success` exists). |
-| `--skip-verify-def` | Skip verification that container `.sif` matches `containers/*.def` |
-| `--run-disabled` | Run tasks even if `TASK_DISABLED` is set in `task_meta.sh` |
-| `--include-deps` | Include missing dependency task runs in the invocation instead of failing |
+
+| Option                      | Description                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`                 | Create manifest without running; print manifest contents to stdout                                                              |
+| `--clean`                   | Remove output folders for specified tasks                                                                                       |
+| `--workload-manager=SCRIPT` | Submit tasks as job array via workload manager script                                                                           |
+| `--job-name=NAME`           | Job name for workload manager                                                                                                   |
+| `--walltime=TIME`           | Walltime for workload manager (format: `days-hours:minutes:seconds`, e.g. `1-01:00:00` for 1 day, 1 hour, 0 minutes, 0 seconds) |
+| `--skip-succeeded`          | Skip task runs that have already succeeded (`.run_success` exists).                                                             |
+| `--skip-verify-def`         | Skip verification that container `.sif` matches `containers/*.def`                                                              |
+| `--run-disabled`            | Run tasks even if `TASK_DISABLED` is set in `task_meta.sh`                                                                      |
+| `--include-deps`            | Include missing dependency task runs in the invocation instead of failing                                                       |
+
 
 **Examples:**
 
@@ -52,13 +54,15 @@ Tasks are defined as a tree under `tasks/`. A task is a directory containing at 
 
 A **task** is a static definition of work. A **task run** is a concrete execution of that work. One task can have multiple task runs (e.g., repeated experiments).
 
-| | Task | Task Run |
-|---|---|---|
-| Purpose | Static definition of work | Concrete execution of that work |
-| Identified by | Directory containing `run.sh` | A named run within a task (e.g., `assets`, `run1`) |
+
+|               | Task                                        | Task Run                                                          |
+| ------------- | ------------------------------------------- | ----------------------------------------------------------------- |
+| Purpose       | Static definition of work                   | Concrete execution of that work                                   |
+| Identified by | Directory containing `run.sh`               | A named run within a task (e.g., `assets`, `run1`)                |
 | Configuration | `task_meta.sh` (hierarchical, root-to-leaf) | `run_env.sh` (hierarchical, inherits task config, adds `$RUN_ID`) |
-| Execution | -- | `run.sh` (leaf-only, invokes code from `assets/`) |
-| Dependencies | -- | `run_deps.sh` (hierarchical, writes `DEPENDENCIES`) |
+| Execution     | --                                          | `run.sh` (leaf-only, invokes code from `assets/`)                 |
+| Dependencies  | --                                          | `run_deps.sh` (hierarchical, writes `DEPENDENCIES`)               |
+
 
 ### Task: `task_meta.sh`
 
@@ -66,35 +70,40 @@ A **task** is a static definition of work. A **task run** is a concrete executio
 
 **Available variables** (provided by the framework):
 
-| Variable | Description |
-|----------|-------------|
-| `$CONTAINERS` | Path to the `containers/` directory |
-| `$ASSETS` | Path to the `assets/` directory |
-| `$TASKS` | Path to the `tasks/` directory |
+
+| Variable             | Description                                |
+| -------------------- | ------------------------------------------ |
+| `$CONTAINERS`        | Path to the `containers/` directory        |
+| `$ASSETS`            | Path to the `assets/` directory            |
+| `$TASKS`             | Path to the `tasks/` directory             |
 | `$WORKLOAD_MANAGERS` | Path to the `workload_managers/` directory |
+
 
 **Writable variables** (read by the framework):
 
-| Variable | Description |
-|----------|-------------|
-| `CONTAINER` | Container image (`.sif`) to use for task runs |
-| `CONTAINER_DEF` | Definition file (`.def`) to validate the container against |
-| `CONTAINER_GPU` | Set to `ON` if the container uses a GPU |
-| `RUN_SPEC` | Default task runs to execute (overridden by the CLI `:RUN_SPEC` suffix) |
-| `WORKLOAD_MANAGER` | Workload manager script to use for this task |
-| `TASK_DISABLED` | Set to `true` (or `1`, `yes`) to disable the task; it will be skipped unless `--run-disabled` is used |
+
+| Variable           | Description                                                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CONTAINER`        | Container image (`.sif`) to use for task runs                                                                                                      |
+| `CONTAINER_DEF`    | Definition file (`.def`) to validate the container against                                                                                         |
+| `CONTAINER_GPU`    | Set to `ON` if the container uses a GPU                                                                                                            |
+| `RUN_SPEC`         | Default task runs to execute. Priority (highest to lowest): CLI `:RUN_SPEC` suffix > `KEY=VALUE` env override > value set in `task_meta.sh` files. |
+| `WORKLOAD_MANAGER` | Workload manager script to use for this task                                                                                                       |
+| `TASK_DISABLED`    | Set to `true` (or `1`, `yes`) to disable the task; it will be skipped unless `--run-disabled` is used                                              |
+
 
 ### Task Run: `run_env.sh`, `run_deps.sh`, `run.sh`
 
 **`run_env.sh`** -- Hierarchical (sourced root-to-leaf, like `task_meta.sh`). Defines variables and helper functions for the run. Has all data from the `task_meta.sh` chain available. Available variables:
 
-| Variable | Description |
-|----------|-------------|
-| `$CONTAINERS` | Path to the `containers/` directory |
-| `$ASSETS` | Path to the `assets/` directory |
-| `$TASKS` | Path to the `tasks/` directory |
+| Variable             | Description                                |
+| -------------------- | ------------------------------------------ |
+| `$CONTAINERS`        | Path to the `containers/` directory        |
+| `$ASSETS`            | Path to the `assets/` directory            |
+| `$TASKS`             | Path to the `tasks/` directory             |
 | `$WORKLOAD_MANAGERS` | Path to the `workload_managers/` directory |
-| `$RUN_ID` | Identifier of the current task run |
+| `$RUN_ID`            | Identifier of the current task run         |
+
 
 **`run_deps.sh`** -- Hierarchical (sourced root-to-leaf). Defines dependencies by writing `DEPENDENCIES` (array of dependency specs). Has the same data and variables available as `run_env.sh`. Each entry is a task path with an optional `:RUN_SPEC` suffix:
 

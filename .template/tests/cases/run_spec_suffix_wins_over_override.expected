@@ -1,5 +1,5 @@
-# path:run_spec suffix; multi-stage experiment deps
---include-deps tasks/experiment/MatMul/IS1/baseline:assets-run1
+# CLI :RUN_SPEC suffix wins over RUN_SPEC=other env override
+RUN_SPEC=other --include-deps tasks/experiment/MatMul/IS1/baseline:run1
 EXPECT_SUCCESS:
 SKIP_VERIFY_DEF=false
 ---
@@ -15,4 +15,4 @@ DEPENDS	1
 0	assets	tasks/experiment/MatMul/IS1/data
 JOB	3
 DEPENDS	2
-0	assets-run1	tasks/experiment/MatMul/IS1/baseline	RUN_SPEC=assets-run1
+0	run1	tasks/experiment/MatMul/IS1/baseline	RUN_SPEC=run1

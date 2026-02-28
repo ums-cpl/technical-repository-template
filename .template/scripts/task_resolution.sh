@@ -203,6 +203,11 @@ build_task_run_pairs() {
     done < <(resolve_arg "$task_path" "$REPOSITORY_ROOT")
 
     # Emit pairs for this spec in run-first, task-second order
+    # Only add RUN_SPEC to overrides when explicitly from CLI: user-used suffix (spec_idx < ORIGINAL_TASK_SPEC_COUNT). Do not add for specs added by --include-deps or when RUN_SPEC comes from task_meta/default.
+    local effective_ov_tsv="$override_tsv"
+    if [[ -n "$run_spec" ]] && [[ "$spec_idx" -lt "${ORIGINAL_TASK_SPEC_COUNT:-0}" ]]; then
+      effective_ov_tsv="${effective_ov_tsv:+${effective_ov_tsv}$'\t'}RUN_SPEC=$run_spec"
+    fi
     local max_runs=0
     local t
     for t in "${tasks_ordered[@]}"; do
@@ -216,7 +221,7 @@ build_task_run_pairs() {
         local -a truns=()
         read -ra truns <<< "${task_runs[$t]:-}"
         if [[ $run_idx -lt ${#truns[@]} ]]; then
-          pairs_with_override+=("$t	${truns[$run_idx]}	$override_tsv")
+          pairs_with_override+=("$t	${truns[$run_idx]}	$effective_ov_tsv")
         fi
       done
     done

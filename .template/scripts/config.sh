@@ -23,5 +23,7 @@ ARRAY_MANIFEST=""
 ARRAY_JOB_ID=""
 ARRAY_TASK_ID=""
 declare -a ENV_OVERRIDES=()
+# Number of task specs from CLI before --include-deps added any. Used so RUN_SPEC is only in manifest when explicitly set by user (suffix or KEY=VALUE).
+ORIGINAL_TASK_SPEC_COUNT=0
 
 RUN_TASKS_OUTPUT_ROOT="$REPOSITORY_ROOT/workload_logs"

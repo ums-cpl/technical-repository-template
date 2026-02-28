@@ -15,6 +15,7 @@ main() {
     TASK_SPECS=("tasks")
     TASK_SPEC_OVERRIDES=("")
   fi
+  ORIGINAL_TASK_SPEC_COUNT=${#TASK_SPECS[@]}
 
   build_task_run_pairs
 
